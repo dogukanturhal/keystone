@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 //
 // Keystone — database lifecycle for tier-1 multi-tenant SaaS.
 // Copyright 2026 HexxLock
