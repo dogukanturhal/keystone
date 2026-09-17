@@ -17,7 +17,7 @@ require (
 	github.com/dogukanturhal/keystone/api v0.2.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.26.0
-	github.com/jackc/pgx/v5 v5.9.1
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/minio/minio-go/v7 v7.0.84
 	github.com/nats-io/nats-server/v2 v2.14.0
 	github.com/nats-io/nats.go v1.52.0
