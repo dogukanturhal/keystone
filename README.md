@@ -93,7 +93,7 @@ cross-cluster API calls.
   exploited by hyperscalers — anyone offering Keystone as a managed service
   must release their modifications. End users running Keystone for their
   own workloads are not affected.
-- **SDK** (`pkg/sdk/`): Apache License 2.0 ([`LICENSE-Apache-SDK`](LICENSE-Apache-SDK)).
+- **CRD API types** (`api/`): Apache License 2.0 ([`api/LICENSE`](api/LICENSE)) — so clients, providers and controllers can import the types without inheriting AGPL.
   Permissive so providers (Crossplane, Terraform, third-party integrations)
   can build against the public API without inheriting AGPL.
 

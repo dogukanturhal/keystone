@@ -143,7 +143,7 @@ adds two knobs:
 
 ### Embeddable Go SDK
 
-The `pkg/sdk/keystone/` package is Apache-2.0-licensed and safe to
+The `api/` module is Apache-2.0-licensed and safe to
 import from proprietary Go code (see
 [ADR 0025](docs/adrs/0025-embeddable-sdk.md)). Typical use:
 
