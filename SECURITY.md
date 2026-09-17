@@ -52,7 +52,7 @@ to be. No bug bounty is offered at this stage.
 **In scope** — we treat these as vulnerabilities:
 
 - The operator binary (`keystone-manager`) and any container image we publish.
-- The public SDK (`pkg/sdk/`) and CRD Go types.
+- The CRD Go types (`api/`), and the client SDKs in the keystone-sdk repository.
 - Admission webhooks and validation logic.
 - Generated RBAC manifests (anything under `config/rbac/`).
 - The CLI (`keystonectl`) and its embedded credentials handling.

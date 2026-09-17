@@ -236,7 +236,7 @@ spec:
                   stamps it after a MigrationExecution reaches Phase=Succeeded for
                   (this schema, the bundle carrying the SD fingerprint annotation).
 
-                  SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare
+                  SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) compare
                   this field against SchemaDefinition.Status.Fingerprint to verify
                   per-schema convergence — race-free vs the matchedSchemas-count
                   baseline that WaitSchemaUpToDate (v0.1.47) uses.

@@ -1236,7 +1236,7 @@ type SchemaDefinitionStatus struct {
 	// it onto DatabaseSchema.Status.LastAppliedFingerprint when a
 	// MigrationExecution succeeds for that schema.
 	//
-	// SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare
+	// SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) compare
 	// this against per-schema LastAppliedFingerprint to verify
 	// convergence in an identity-based, race-free way.
 	//
