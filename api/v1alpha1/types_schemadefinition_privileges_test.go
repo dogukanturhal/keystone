@@ -12,7 +12,7 @@ import (
 func TestDesiredDefaultPrivilege_Marshall(t *testing.T) {
 	dp := DesiredDefaultPrivilege{
 		ForRole:    "keystone_admin",
-		ToRole:     "falcon_id_app",
+		ToRole:     "example_service_app",
 		Schema:     "public",
 		ObjectType: "tables",
 		Privileges: []string{"SELECT", "INSERT", "UPDATE", "DELETE",
@@ -30,10 +30,10 @@ func TestDesiredDefaultPrivilege_Marshall(t *testing.T) {
 // struct's shape.
 func TestDesiredTablePrivilege_Marshall(t *testing.T) {
 	tp := DesiredTablePrivilege{
-		ToRole:     "falcon_id_app",
+		ToRole:     "example_service_app",
 		Privileges: []string{"SELECT", "INSERT", "UPDATE", "DELETE"},
 	}
-	if tp.ToRole != "falcon_id_app" {
+	if tp.ToRole != "example_service_app" {
 		t.Fatalf("ToRole: got %q", tp.ToRole)
 	}
 	if tp.WithGrantOption {
@@ -52,13 +52,13 @@ func TestSchemaDefinitionSpec_PrivilegesField_Present(t *testing.T) {
 			Name:    "iam_oauth_logout_outbox",
 			Columns: []DesiredColumn{{Name: "id", Type: "uuid", Nullable: false, PrimaryKey: true}},
 			Privileges: []DesiredTablePrivilege{{
-				ToRole:     "falcon_id_app",
+				ToRole:     "example_service_app",
 				Privileges: []string{"SELECT", "INSERT", "UPDATE", "DELETE"},
 			}},
 		}},
 		DefaultPrivileges: []DesiredDefaultPrivilege{{
 			ForRole:    "keystone_admin",
-			ToRole:     "falcon_id_app",
+			ToRole:     "example_service_app",
 			ObjectType: "tables",
 			Privileges: []string{"SELECT", "INSERT", "UPDATE", "DELETE",
 				"TRUNCATE", "REFERENCES", "TRIGGER"},

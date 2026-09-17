@@ -107,7 +107,7 @@ func (a *Admin) Ping(ctx context.Context) error {
 //     If we ran it on every reconcile, the controller would loop on a
 //     permanent error and OOM via the audit-write storm (observed
 //     2026-05-04: a v0.1.51 deploy that ran the unconditional GRANT
-//     against pre-existing falcon_id_app + hexxlock_falcon_id_control_
+//     against pre-existing example_service_app + example_service_control_
 //     owner roles took the operator into CrashLoopBackOff).
 //
 //  2. Pre-existing roles are by definition usable by the admin —

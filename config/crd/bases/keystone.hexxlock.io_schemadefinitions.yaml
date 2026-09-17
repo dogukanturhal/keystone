@@ -164,7 +164,7 @@ spec:
                   234): the operator-emitted bundles run CREATE TABLE as the
                   keystone_admin role. Pre-Keystone default-privileges were set
                   for the `postgres` role, so any keystone_admin-created table
-                  silently dropped out of the falcon_id_app grant chain. The
+                  silently dropped out of the example_service_app grant chain. The
                   BackchannelLogoutDrainer spammed SQLSTATE 42501 every 5s until
                   a hand-authored migration bundle re-pointed ALTER DEFAULT
                   PRIVILEGES at keystone_admin. With DefaultPrivileges declared
@@ -180,12 +180,12 @@ spec:
                     <Privileges> ON <ObjectType> TO <ToRole>;\n\nIdempotent in PostgreSQL
                     — re-issuing the same grant against the\nsame role/schema/object-type
                     is a no-op (pg_default_acl uniqueness).\n\nPractical example for
-                    the example-service 2026-05-12 fix:\n\n\tdefaultPrivileges:\n\t  - forRole:
-                    keystone_admin\n\t    toRole:  falcon_id_app\n\t    objectType:
-                    tables\n\t    privileges: [SELECT, INSERT, UPDATE, DELETE, TRUNCATE,
-                    REFERENCES, TRIGGER]\n\t  - forRole: keystone_admin\n\t    toRole:
-                    \ falcon_id_app\n\t    objectType: sequences\n\t    privileges:
-                    [USAGE, SELECT, UPDATE]"
+                    the example-service 2026-05-12 fix:\n\n\tdefaultPrivileges:\n\t
+                    \ - forRole: keystone_admin\n\t    toRole:  example_service_app\n\t
+                    \   objectType: tables\n\t    privileges: [SELECT, INSERT, UPDATE,
+                    DELETE, TRUNCATE, REFERENCES, TRIGGER]\n\t  - forRole: keystone_admin\n\t
+                    \   toRole:  example_service_app\n\t    objectType: sequences\n\t
+                    \   privileges: [USAGE, SELECT, UPDATE]"
                   properties:
                     forRole:
                       description: |-

@@ -526,11 +526,11 @@ type DesiredUniqueConstraint struct {
 //
 //	defaultPrivileges:
 //	  - forRole: keystone_admin
-//	    toRole:  falcon_id_app
+//	    toRole:  example_service_app
 //	    objectType: tables
 //	    privileges: [SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER]
 //	  - forRole: keystone_admin
-//	    toRole:  falcon_id_app
+//	    toRole:  example_service_app
 //	    objectType: sequences
 //	    privileges: [USAGE, SELECT, UPDATE]
 type DesiredDefaultPrivilege struct {
@@ -1060,7 +1060,7 @@ type SchemaDefinitionSpec struct {
 	// 234): the operator-emitted bundles run CREATE TABLE as the
 	// keystone_admin role. Pre-Keystone default-privileges were set
 	// for the `postgres` role, so any keystone_admin-created table
-	// silently dropped out of the falcon_id_app grant chain. The
+	// silently dropped out of the example_service_app grant chain. The
 	// BackchannelLogoutDrainer spammed SQLSTATE 42501 every 5s until
 	// a hand-authored migration bundle re-pointed ALTER DEFAULT
 	// PRIVILEGES at keystone_admin. With DefaultPrivileges declared
