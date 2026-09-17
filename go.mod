@@ -13,6 +13,8 @@ go 1.25.5
 replace github.com/dogukanturhal/keystone/api => ./api
 
 require (
+	github.com/dogukanturhal/keystone-sdk/go v0.4.0
+	github.com/dogukanturhal/keystone/api v0.2.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.26.0
 	github.com/jackc/pgx/v5 v5.9.1
@@ -21,8 +23,6 @@ require (
 	github.com/nats-io/nats.go v1.52.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
-	github.com/dogukanturhal/keystone-sdk/go v0.3.1
-	github.com/dogukanturhal/keystone/api v0.1.3-0.20260806191047-435991b27dad
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
