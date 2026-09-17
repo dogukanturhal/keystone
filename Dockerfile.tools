@@ -12,7 +12,7 @@
 # CONTENTS
 # ========
 #   - keystonectl (built from this repo — CI jobs and the ORM
-#     migration-drift check in hexxlock/ci-components run it)
+#     migration-drift check in your shared CI templates run it)
 #   - kubectl (matching cluster version)
 #   - cosign  (matching keystone CI sign-image stage)
 #   - busybox sh + standard POSIX utilities (ash, date, sha256sum,
@@ -56,7 +56,7 @@ ARG COSIGN_VERSION=v3.1.2
 ARG GO_VERSION=1.26.5
 
 # keystonectl build stage. The tools image is what CI jobs run in, and the
-# migration-drift check in hexxlock/ci-components needs keystonectl —
+# migration-drift check in your shared CI templates needs keystonectl —
 # an image whose whole purpose is tooling should carry the project's own
 # CLI rather than make every consumer `go install` it behind a PAT.
 # Mirrors the manager's build stage (see Dockerfile) so the two binaries

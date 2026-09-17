@@ -141,7 +141,7 @@ spec:
                   Name is the actual PostgreSQL database name. Distinct from
                   metadata.name: PG identifiers commonly use underscores (e.g.
                   example_suite) while Kubernetes resources prefer hyphens
-                  (hexxlock-erp). Required so this never has to be inferred.
+                  (example-suite). Required so this never has to be inferred.
                 maxLength: 63
                 pattern: ^[a-z_][a-z0-9_]*$
                 type: string

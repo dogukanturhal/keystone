@@ -243,7 +243,7 @@ in one MR.**
 A single MR (or two coordinated MRs) updates THREE locations
 together so the cluster's view stays consistent:
 
-1. `platform-bootstrap/clusters/.../kyverno-keystone-policy.yaml` —
+1. `<gitops-bootstrap-repo>/clusters/.../kyverno-keystone-policy.yaml` —
    replace the `publicKeys:` block with the contents of the new
    `cosign.pub`. This is the actual admission gate.
 

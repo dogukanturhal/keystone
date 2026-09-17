@@ -194,7 +194,7 @@ PostgreSQL and fails the MR if it would have authored anything:
 
 ```yaml
 include:
-  - project: hexxlock/ci-components
+  - project: <your-org>/ci-components
     file: templates/keystone-migration-drift.yml
     ref: main
 

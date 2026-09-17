@@ -21,7 +21,7 @@ type LogicalDatabaseSpec struct {
 	// Name is the actual PostgreSQL database name. Distinct from
 	// metadata.name: PG identifiers commonly use underscores (e.g.
 	// example_suite) while Kubernetes resources prefer hyphens
-	// (hexxlock-erp). Required so this never has to be inferred.
+	// (example-suite). Required so this never has to be inferred.
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=63
