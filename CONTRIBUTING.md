@@ -148,7 +148,7 @@ import from proprietary Go code (see
 [ADR 0025](docs/adrs/0025-embeddable-sdk.md)). Typical use:
 
 ```go
-import ks "github.com/dogukanturhal/keystone/pkg/sdk/keystone"
+import ks "github.com/dogukanturhal/keystone-sdk/go/keystone"
 
 findings, _ := ks.Lint(ctx, "my-app", "v1", files)      // pure Go, no DB
 result, _  := ks.Apply(ctx, pool, ks.ApplyOptions{...}) // runner + schema_migrations
@@ -159,8 +159,8 @@ plan, _    := ks.Diff(snap, desiredSpec, ks.DiffOptions{}) // declarative diff
 Run the SDK's own tests with:
 
 ```
-GOWORK=off go test ./pkg/sdk/keystone/                          # unit
-GOWORK=off go test -tags=integration ./pkg/sdk/keystone/        # testcontainers round-trip
+GOWORK=off go test ./go/keystone/        # unit (in the keystone-sdk repo)
+GOWORK=off go test -tags=integration ./go/keystone/   # testcontainers round-trip
 ```
 
 SDK surface is v1-stable; breaking changes require a module major
