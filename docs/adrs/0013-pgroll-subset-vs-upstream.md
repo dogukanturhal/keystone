@@ -53,7 +53,7 @@ but more deps means more release-audit work).
 
 Harder: operations we didn't implement require the `versioned`
 strategy. We call this out in the docs; for the three high-frequency
-operations it covers 80% of real migrations (stats from Falcon-ID's
+operations it covers 80% of real migrations (stats from Example Service's
 migrations/ folder confirm).
 
 Harder: when upstream adds safety fixes, we have to port them. We

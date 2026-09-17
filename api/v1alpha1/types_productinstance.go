@@ -28,7 +28,7 @@ const (
 // ProductInstanceSpec describes one tenant's instance of a product.
 type ProductInstanceSpec struct {
 	// TenantID is the UUID identifying the tenant. Cross-referenced
-	// against Falcon-ID's tenant directory; the controller does NOT
+	// against Example Service's tenant directory; the controller does NOT
 	// validate the UUID exists there (that's the orchestrator's
 	// responsibility upstream).
 	//

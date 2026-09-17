@@ -215,7 +215,7 @@ silently failing on a missing file.
 
 ## CI integration
 
-Falcon-ID's `hack/sql-lint` (added in example-service !97 after the 2026-05-01
+Example Service's `hack/sql-lint` (added in example-service !97 after the 2026-05-01
 oauth_client_columns whitespace bug) checks all 5 standards above
 against every migration in the project. Run locally before commit:
 

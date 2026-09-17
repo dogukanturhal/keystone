@@ -10,7 +10,7 @@ metadata:
   labels:
     keystone.hexxlock.io/role: hub-and-only
 spec:
-  displayName: "Production EU-TR-1a (hub + sole canary)"
+  displayName: "Production EU-West-1 (hub + sole canary)"
   tier: canary
   region: eu-west-1
   dataResidency: eu

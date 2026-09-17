@@ -6,7 +6,7 @@
 
 ## Context
 
-Falcon-ID (HexxLock's IAM service) is the canonical Keystone adoption
+Example Service (HexxLock's IAM service) is the canonical Keystone adoption
 target. Its existing database already has a `public.schema_migrations`
 table with the golang-migrate standard shape: `(version INTEGER, filename
 VARCHAR, checksum, applied_at)`.
@@ -17,15 +17,15 @@ duration_ms, dirty)`. The `version` column has a type mismatch
 (`INTEGER` vs `TEXT`) that would require an ALTER during adoption, and the
 additional columns need backfill.
 
-Forcing Falcon-ID's table to conform to Keystone's shape means touching
+Forcing Example Service's table to conform to Keystone's shape means touching
 production history. That's a risk we don't need to take.
 
 ## Decision
 
 `LogicalDatabase.spec.trackingTableName` is a configurable field. Default
 `"schema_migrations"` (golang-migrate convention, right choice for
-greenfield). Falcon-ID sets it to `"keystone_schema_migrations"` so
-Keystone's tracking table is a new sibling to Falcon-ID's existing table
+greenfield). Example Service sets it to `"keystone_schema_migrations"` so
+Keystone's tracking table is a new sibling to Example Service's existing table
 in the same schema. Both survive; neither is disturbed.
 
 ## Consequences
@@ -40,8 +40,7 @@ resumes writing to `schema_migrations`.
 Harder: a single database can drift between Keystone's and a prior
 migrator's tracking tables if both run concurrently. We explicitly don't
 support that — ADR 0007 mandates Git as the single source of truth, and
-the prior migrator's auto-migrate should be disabled during cutover
-(documented in `example-service-cutover.md`).
+the prior migrator's auto-migrate should be disabled during cutover.
 
 Harder: operators monitoring schema migration state must know which table
 to query. We mitigate by emitting both tables' high-water marks as

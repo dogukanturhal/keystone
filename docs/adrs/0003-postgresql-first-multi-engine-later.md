@@ -7,7 +7,7 @@
 ## Context
 
 HexxLock's stack runs exclusively on PostgreSQL today: CNPG-managed clusters
-in-cluster, Falcon-ID + business services all on PG 16. Designing multi-engine
+in-cluster, Example Service + business services all on PG 16. Designing multi-engine
 abstractions upfront would slow v0.1.0 and produce speculative interfaces that
 don't match the engines we'd actually support.
 

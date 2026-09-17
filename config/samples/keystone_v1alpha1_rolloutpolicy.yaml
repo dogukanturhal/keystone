@@ -50,7 +50,7 @@ metadata:
   labels:
     keystone.hexxlock.io/role: free-tier-shadow
 spec:
-  displayName: "Production EU-TR-1a (free-tier shadow)"
+  displayName: "Production EU-West-1 (free-tier shadow)"
   tier: free
   region: eu-west-1
   dataResidency: eu

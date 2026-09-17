@@ -137,6 +137,6 @@ plan's statements are no longer reviewable.
   point of admission-time validation. Rejected.
 
 - **Auto-delete the plan on execution success** (to reduce clutter).
-  Plans are audit artifacts — the Falcon-ID plan for March 2025
+  Plans are audit artifacts — the Example Service plan for March 2025
   should still be queryable in March 2026. Retention is the right
   answer, even if `kubectl get migrationplan` gets noisy.

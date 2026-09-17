@@ -299,7 +299,7 @@ Operational hardening + v0.1.0 release.
 - [ ] Phase 8.1 — OpenTelemetry tracing + multi-window burn-rate
       alerts.
 - [ ] Phase 8.1 — delete legacy `services/db-migrator` and
-      `services/db-provisioner` (deferred — Falcon-ID may still
+      `services/db-provisioner` (deferred — Example Service may still
       reference them per session memory; needs explicit cutover
       verification).
 

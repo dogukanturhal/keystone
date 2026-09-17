@@ -19,7 +19,6 @@ New runbook guidelines:
 | Runbook | Symptom |
 |---|---|
 | [runbook.md](../runbook.md) | Master catalog — covers reconcile errors, drift detection, pgroll stalls, ProductInstance provisioning, manager crashloop |
-| [example-service-cutover.md](../example-service-cutover.md) | Adopt Falcon-ID's existing PG database into Keystone management |
 
 ## Planned (roadmap)
 

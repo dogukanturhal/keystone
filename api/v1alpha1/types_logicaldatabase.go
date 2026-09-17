@@ -116,7 +116,7 @@ type LogicalDatabaseSpec struct {
 	// databases.
 	//
 	// Override when adopting Keystone on a database that already has a
-	// migrator managing its own `schema_migrations`. Falcon-ID is the
+	// migrator managing its own `schema_migrations`. Example Service is the
 	// canonical example: its existing table has `version INTEGER PK`
 	// while Keystone's runner uses `version TEXT PK`. Setting
 	// trackingTableName to "keystone_schema_migrations" lets both

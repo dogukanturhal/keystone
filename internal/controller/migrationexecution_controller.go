@@ -183,9 +183,9 @@ func (r *MigrationExecutionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// trackingTableName comes from the LogicalDatabase (defaults to
-	// "schema_migrations"). Falcon-ID overrides this to
+	// "schema_migrations"). Example Service overrides this to
 	// "keystone_schema_migrations" so Keystone's TEXT-PK tracking table
-	// co-exists with Falcon-ID's existing INTEGER-PK schema_migrations.
+	// co-exists with Example Service's existing INTEGER-PK schema_migrations.
 	//
 	// ownerRole is the LogicalDatabase's spec.ownerRole — the runner
 	// SET LOCAL ROLE's to this PG role inside the migration tx so

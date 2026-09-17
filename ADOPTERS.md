@@ -32,7 +32,7 @@ roadmap prioritisation and you will not appear in this file.
 
 | Organisation | Status | Use case | Since | Contact | Notes |
 |---|---|---|---|---|---|
-| HexxLock Platform (Falcon-ID) | Adopting, Q2 2026 | PostgreSQL schema management for the Falcon-ID IAM service; first in-flight cutover from the legacy `db-migrator` / `db-provisioner` stack | 2026-04 | `platform@hexxlock.com` | Cutover planned this quarter; not yet fully migrated. Tracked in `services/keystone/docs/example-service-cutover.md`. |
+| HexxLock Platform (Example Service) | Adopting, Q2 2026 | PostgreSQL schema management for the Example Service IAM service; first in-flight cutover from the legacy `db-migrator` / `db-provisioner` stack | 2026-04 | `platform@hexxlock.com` | Cutover planned this quarter; not yet fully migrated. |
 | _[Pending — contact maintainers@hexxlock.com to be added]_ | — | — | — | — | — |
 | _[Pending — contact maintainers@hexxlock.com to be added]_ | — | — | — | — | — |
 
@@ -46,9 +46,9 @@ roadmap prioritisation and you will not appear in this file.
   least one production PostgreSQL workload.
 
 The HexxLock Platform entry is `Adopting` rather than `Production` on purpose.
-Falcon-ID has not yet retired its embedded `.Migrate()` calls (Phase 3.2 of
+Example Service has not yet retired its embedded `.Migrate()` calls (Phase 3.2 of
 the roadmap); until it does, the honest label is Adopting. The entry will
-advance to `Production` when Falcon-ID's legacy paths are removed and the
+advance to `Production` when Example Service's legacy paths are removed and the
 `services/db-migrator` / `services/db-provisioner` deployments are scaled to
 zero (Phase 4.2 + 8.1).
 

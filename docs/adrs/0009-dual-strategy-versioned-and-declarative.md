@@ -20,7 +20,7 @@ Two ecosystems dominate schema management today:
    logic) are harder to express.
 
 Keystone's users come from both backgrounds. Forcing them into one camp is
-a wrong fit — schema authors in Falcon-ID (Go + golang-migrate) expect
+a wrong fit — schema authors in Example Service (Go + golang-migrate) expect
 versioned SQL; ORM-driven teams (business monolith with EF Core) expect
 declarative.
 
