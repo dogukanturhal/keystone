@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# MigrationBundle demonstrating B3 wave-based intra-bundle
+# parallelism. Four column additions across four distinct tables
+# normally run sequentially (~4x the single-op latency); with
+# parallelism: 4 they fit into a single wave and run concurrently.
+#
+# See docs/adrs/0020-intra-bundle-wave-parallelism.md for the
+# scheduler design.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: MigrationBundle
+metadata:
+  name: multi-table-add-columns
+  namespace: keystone-system
+  labels:
+    module: commerce
+    tier: prod
+spec:
+  version: v3.0.0
+  strategy: pgroll-expand-contract
+  schemaSelector:
+    matchLabels:
+      module: commerce
+  # B3 — up to 4 wave operations run concurrently. Bundle contains
+  # 4 ops on 4 distinct tables, so a single wave of 4 ops executes
+  # in parallel instead of 4 serial ops. Default 0 preserves strict-
+  # serial behaviour for existing bundles.
+  parallelism: 4
+  operations:
+    - kind: add_column
+      table: users
+      addColumn:
+        name: last_login_at
+        type: timestamptz
+        nullable: true
+    - kind: add_column
+      table: orders
+      addColumn:
+        name: canceled_reason
+        type: text
+        nullable: true
+    - kind: add_column
+      table: products
+      addColumn:
+        name: search_tags
+        type: jsonb
+        nullable: true
+    - kind: add_column
+      table: invoices
+      addColumn:
+        name: paid_at
+        type: timestamptz
+        nullable: true

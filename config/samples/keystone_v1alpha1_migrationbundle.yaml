@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample MigrationBundle — applies the CRM v42 SQL pack to every
+# DatabaseSchema labeled module=crm. Source is a ConfigMap that ships
+# the SQL files alongside the bundle.
+#
+# Production usage:
+#   1. Author SQL in <gitops-repo>/keystone/migrations/catalog/v42/
+#   2. CI pipeline packs them into a ConfigMap (kustomize configMapGenerator)
+#   3. ArgoCD syncs both the ConfigMap and this MigrationBundle
+#   4. MigrationBundleReconciler creates one MigrationExecution per matched schema
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: MigrationBundle
+metadata:
+  name: crm-v42
+  namespace: keystone-system
+spec:
+  version: v42
+  strategy: versioned
+  source:
+    type: ConfigMap
+    configMapRef:
+      name: crm-v42-sql
+      filePattern: "*.up.sql"
+  schemaSelector:
+    matchLabels:
+      module: crm
+---
+# The ConfigMap holding the SQL — Phase 3.1 will move this to a
+# kustomize configMapGenerator. Inline here to keep the sample
+# self-contained.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crm-v42-sql
+  namespace: keystone-system
+data:
+  001_add_lead_score.up.sql: |
+    -- Idempotent: ALTER TABLE … ADD COLUMN IF NOT EXISTS
+    ALTER TABLE leads
+      ADD COLUMN IF NOT EXISTS score NUMERIC(5,2);
+  002_index_lead_score.up.sql: |
+    -- CONCURRENTLY would be the production choice; kept simple here
+    -- because the sample table is empty.
+    CREATE INDEX IF NOT EXISTS idx_leads_score ON leads (score);

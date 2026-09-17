@@ -1,0 +1,80 @@
+---
+# Aggregated, narrow ClusterRole granted to product service accounts
+# (e.g. example-service, example-suite) so they can call the keystone SDK's
+# EnrollSchema / DeenrollSchema helpers at runtime.
+#
+# Scope is intentionally restricted to LogicalDatabase + DatabaseSchema.
+# SchemaDefinitions are NOT included — those are GitOps-authored
+# contracts. SchemaPolicies, MigrationBundles, MigrationExecutions
+# are NOT included — those are Keystone-internal pipeline objects.
+#
+# Bind via a RoleBinding (not ClusterRoleBinding) in the product's
+# namespace so the SDK's reach is namespace-scoped per product:
+#
+#   apiVersion: rbac.authorization.k8s.io/v1
+#   kind: RoleBinding
+#   metadata:
+#     namespace: example-service
+#     name: example-service-tenant-enroller
+#   roleRef:
+#     apiGroup: rbac.authorization.k8s.io
+#     kind: ClusterRole
+#     name: keystone-tenant-enroller
+#   subjects:
+#     - kind: ServiceAccount
+#       namespace: example-service
+#       name: example-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keystone-tenant-enroller
+  labels:
+    app.kubernetes.io/part-of: keystone
+    app.kubernetes.io/component: sdk-rbac
+rules:
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["logicaldatabases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["logicaldatabases/status"]
+    verbs: ["get"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["databaseschemas"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["databaseschemas/status"]
+    verbs: ["get"]
+  # Read-only on SchemaDefinitions: WaitSchemaUpToDate (v0.1.47) polls
+  # SD.Status.MatchedSchemas + Conditions[Ready] to confirm the SD-
+  # emitted MigrationBundle has applied. Read scope ONLY — SDs remain
+  # GitOps-authored contracts; SDK consumers must NEVER create/mutate
+  # them. Same intent as the design header above ("SchemaDefinitions
+  # are NOT included" — that meant write surface; read surface is now
+  # required by WaitSchemaUpToDate).
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["schemadefinitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["schemadefinitions/status"]
+    verbs: ["get"]
+  # Secret read+write on the binding's namespace: the LogicalDatabase
+  # CRD's spec.ownerRolePasswordSecretRef (v0.1.54+) lets SDK consumers
+  # hand Keystone the password to set on the OwnerRole at CREATE time
+  # (and on rotation when the Secret content changes). The consumer
+  # writes the Secret in the same namespace as the LogicalDatabase, so
+  # the SDK's CreateOrUpdate against that Secret needs create+update;
+  # subsequent reads (e.g. retry, password recovery) need get; cleanup
+  # on DeenrollSchema needs delete; informer cache needs list+watch.
+  #
+  # Since this ClusterRole is bound via RoleBinding (NOT
+  # ClusterRoleBinding) into the namespace where the LogicalDatabase
+  # lives, the secret-write surface is namespace-scoped — the SA can
+  # only touch Secrets in the LD's namespace, NOT cluster-wide.
+  #
+  # Consumers that don't use ownerRolePasswordSecretRef (i.e. roles
+  # are managed out-of-band by Vault dynamic secrets, manual psql,
+  # etc.) get the same RoleBinding but never exercise these verbs —
+  # no extra exposure, no opt-in flag needed.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

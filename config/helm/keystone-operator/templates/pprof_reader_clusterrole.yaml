@@ -1,0 +1,49 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if and .Values.metrics.pprof.enabled .Values.metrics.pprof.renderReaderClusterRole }}
+# Bearer-token RBAC for the operator's /debug/pprof/* endpoints.
+#
+# The metrics server's FilterProvider runs SubjectAccessReview on every
+# request. /metrics and /metrics/cadvisor have their own conventional
+# nonResourceURL grants; /debug/pprof/* does NOT — granting Prometheus
+# access to /metrics does not implicitly grant pprof access. That's the
+# point: pprof exposes runtime internals (function names, ASLR offsets,
+# allocation call graphs) that go well beyond what /metrics scraping
+# justifies, so it gets a separate role.
+#
+# This role is rendered but NOT bound. Operators bind it to a debugging
+# ServiceAccount for the duration of an investigation, then unbind:
+#
+#   # 1. Bind to the kube-prometheus-stack-prometheus SA for a heap pull.
+#   kubectl create clusterrolebinding keystone-pprof-temp \
+#     --clusterrole={{ include "keystone-operator.fullname" . }}-pprof-reader \
+#     --serviceaccount=monitoring:kube-prometheus-stack-prometheus
+#
+#   # 2. Capture profile.
+#   POD=$(kubectl -n {{ .Release.Namespace }} get pods \
+#     -l app.kubernetes.io/name={{ include "keystone-operator.name" . }} \
+#     -o name | head -1)
+#   kubectl -n {{ .Release.Namespace }} port-forward $POD 18443:{{ .Values.metrics.port }} &
+#   TOKEN=$(kubectl -n monitoring create token kube-prometheus-stack-prometheus --duration=600s)
+#   curl -sk -H "Authorization: Bearer $TOKEN" \
+#     https://127.0.0.1:18443/debug/pprof/heap > /tmp/keystone-heap.pprof
+#
+#   # 3. Unbind so production goes back to PoLP.
+#   kubectl delete clusterrolebinding keystone-pprof-temp
+#
+# Why no auto-binding: a permanent binding would mean any compromise of
+# the bound SA's token leaks operator runtime state. The on-demand
+# pattern keeps the attack window measured in minutes per investigation
+# instead of "always".
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "keystone-operator.fullname" . }}-pprof-reader
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs:
+      - /debug/pprof
+      - /debug/pprof/*
+    verbs:
+      - get
+{{- end }}

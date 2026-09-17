@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Keystone operator — Helm chart.
+#
+# Primary canonical source is kustomize (config/default). This chart is an
+# equivalent consumer-facing package for teams that prefer Helm. It must
+# track the kustomize bundle's behaviour; divergences are bugs.
+apiVersion: v2
+name: keystone-operator
+description: Database lifecycle for tier-1 multi-tenant SaaS. GitOps-native. Multi-cluster. Zero-downtime.
+type: application
+
+# appVersion matches the published keystone-manager image tag verbatim.
+# v-prefix matches the Harbor + git-tag convention (kustomize bundle
+# manager.yaml pins `:v0.1.x`). Without the v-prefix, helm template
+# default tag resolution produced `:0.1.x` which doesn't exist in Harbor.
+appVersion: "v0.1.4"
+# version is the chart version — bump independently of appVersion when
+# values.yaml / templates change without an image rebuild.
+version: 0.1.4
+
+kubeVersion: ">=1.28.0"
+
+keywords:
+  - postgres
+  - postgresql
+  - migrations
+  - schema-management
+  - operator
+  - gitops
+  - multi-tenant
+
+# home + sources point at the upstream GitLab repo today. A GitHub mirror
+# is planned (see docs/roadmap.md Phase 16 "open source graduation") —
+# when it lands, add the github.com/hexxlock/keystone URL here alongside.
+home: https://github.com/dogukanturhal/platform/-/tree/master/services/keystone
+sources:
+  - https://github.com/dogukanturhal/platform/-/tree/master/services/keystone
+  # NOTE: GitHub mirror (github.com/hexxlock/keystone) pending Phase 16
+  # open-source graduation. Update this list when the mirror is public.
+
+maintainers:
+  - name: HexxLock Platform Team
+    email: platform@hexxlock.com
+    url: https://github.com/dogukanturhal/platform
+
+annotations:
+  # Artifact Hub category (informational; harmless on other registries).
+  artifacthub.io/category: database
+  artifacthub.io/license: AGPL-3.0-or-later
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Seamless Upgrades
+  artifacthub.io/crds: |
+    - kind: DatabaseProvider
+      version: v1alpha1
+      name: databaseproviders.keystone.hexxlock.io
+      description: Connection target + admin credentials reference for a PostgreSQL cluster.
+    - kind: LogicalDatabase
+      version: v1alpha1
+      name: logicaldatabases.keystone.hexxlock.io
+      description: A named PostgreSQL database owned by Keystone, with role + extensions.
+    - kind: DatabaseSchema
+      version: v1alpha1
+      name: databaseschemas.keystone.hexxlock.io
+      description: A schema inside a LogicalDatabase, ownership + default privileges.
+    - kind: SchemaDefinition
+      version: v1alpha1
+      name: schemadefinitions.keystone.hexxlock.io
+      description: Desired-state DDL declaration (declarative strategy).
+    - kind: SchemaPolicy
+      version: v1alpha1
+      name: schemapolicies.keystone.hexxlock.io
+      description: Per-schema policy — analyzer exclusions, lint overrides.
+    - kind: MigrationBundle
+      version: v1alpha1
+      name: migrationbundles.keystone.hexxlock.io
+      description: Versioned set of migration files or operations to apply.
+    - kind: MigrationPlan
+      version: v1alpha1
+      name: migrationplans.keystone.hexxlock.io
+      description: Plan-phase output — analyzer findings before apply.
+    - kind: MigrationExecution
+      version: v1alpha1
+      name: migrationexecutions.keystone.hexxlock.io
+      description: Apply-phase run of a MigrationBundle against one schema.
+    - kind: RolloutPolicy
+      version: v1alpha1
+      name: rolloutpolicies.keystone.hexxlock.io
+      description: Staged rollout policy (canary → soak → full).
+    - kind: DriftReport
+      version: v1alpha1
+      name: driftreports.keystone.hexxlock.io
+      description: Observed drift between desired and live schema.
+    - kind: ClusterRegistration
+      version: v1alpha1
+      name: clusterregistrations.keystone.hexxlock.io
+      description: Spoke cluster registration for hub-spoke topology.
+    - kind: ProductDefinition
+      version: v1alpha1
+      name: productdefinitions.keystone.hexxlock.io
+      description: A product template — schemas + rollout policy.
+    - kind: ProductInstance
+      version: v1alpha1
+      name: productinstances.keystone.hexxlock.io
+      description: Materialised product for a tenant.

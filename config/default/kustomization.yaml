@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Default deployment bundle: namespace + RBAC + manager Deployment.
+# Consumed by the ArgoCD Application in the GitOps repository
+# (platform/keystone/manager-application.yaml).
+#
+# Note: CRDs are intentionally NOT included here. They ship via a separate
+# ArgoCD Application (sync wave -1) so they install before the controller.
+# See: services/keystone/config/crd/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: keystone-system
+resources:
+  - namespace.yaml
+  - ../rbac
+  - ../manager

@@ -1,0 +1,272 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: auditlogs.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: AuditLog
+    listKind: AuditLogList
+    plural: auditlogs
+    shortNames:
+    - alog
+    singular: auditlog
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.retentionDays
+      name: Retention
+      type: integer
+    - jsonPath: .status.nextSequence
+      name: NextSeq
+      type: integer
+    - jsonPath: .status.lastEntryTime
+      name: LastEntry
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AuditLog is the singleton coordination CR for the append-only
+          audit chain. Exactly one instance named `AuditLogName` ("keystone")
+          exists per cluster.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AuditLogSpec is static configuration for the audit chain.
+            properties:
+              archive:
+                description: |-
+                  Archive optionally enables the AuditEntry retention controller.
+                  When set, entries older than RetentionDays are batch-uploaded
+                  to the configured S3-compatible bucket as gzipped JSON Lines and
+                  then deleted from etcd, freeing the cluster from unbounded
+                  chain growth. When unset (default), the retention controller
+                  stays dormant — entries grow forever.
+
+                  The archive backend MUST support object-lock compliance mode
+                  (S3 retention + WORM) for tier-1 compliance: even with archive
+                  enabled, deleted CRs must remain immutable for the full
+                  retention window in the off-cluster store.
+                properties:
+                  backend:
+                    default: s3
+                    description: |-
+                      Backend selects the archive implementation. Only "s3" is
+                      supported today. "noop" forces the dormant path even when this
+                      block is otherwise populated — useful for staging soak.
+                    enum:
+                    - s3
+                    - noop
+                    type: string
+                  batchSize:
+                    default: 1000
+                    description: |-
+                      BatchSize caps the number of expired entries archived in a
+                      single archive object. Defaults to 1000 — high enough to keep
+                      the per-object overhead low, low enough that one archive batch
+                      fits comfortably in the manager Pod's memory limit (128Mi
+                      requested by chart default; an entry averages ~4-6KB).
+                    format: int32
+                    maximum: 10000
+                    minimum: 10
+                    type: integer
+                  checkInterval:
+                    default: 1h
+                    description: |-
+                      CheckInterval controls how often the retention loop re-scans
+                      AuditEntries for expiry. Default 1h. Lower for tests, higher
+                      for very large clusters where the list cost is non-trivial.
+                    type: string
+                  deleteRateLimit:
+                    default: 100
+                    description: |-
+                      DeleteRateLimit caps AuditEntry CR deletes per second to
+                      avoid the 2026-04-21-style etcd write-amplification pattern
+                      where a sudden flood of writes wedges the cluster. Default 100
+                      matches the watermark observed during steady-state recovery in
+                      that incident.
+                    format: int32
+                    maximum: 10000
+                    minimum: 1
+                    type: integer
+                  s3:
+                    description: |-
+                      S3 holds the S3-compatible endpoint configuration.
+                      Required when Backend = "s3".
+                    properties:
+                      bucket:
+                        description: |-
+                          Bucket is the destination bucket name. The controller does NOT
+                          create the bucket; an operator-managed Crossplane S3Bucket (or
+                          equivalent) must provision it with object-lock + WORM retention
+                          covering RetentionDays before the controller is enabled.
+                        maxLength: 63
+                        minLength: 3
+                        pattern: ^[a-z0-9][a-z0-9.-]*[a-z0-9]$
+                        type: string
+                      credentialsRef:
+                        description: |-
+                          CredentialsRef references a Secret in the controller's system
+                          namespace containing the S3 access key + secret key. Keys
+                          "accessKeyID" and "secretAccessKey" by default; override via
+                          AccessKeyIDKey and SecretAccessKeyKey.
+                        properties:
+                          accessKeyIDKey:
+                            default: accessKeyID
+                            description: |-
+                              AccessKeyIDKey is the key in the Secret holding the S3 access
+                              key ID. Default "accessKeyID".
+                            type: string
+                          secretAccessKeyKey:
+                            default: secretAccessKey
+                            description: |-
+                              SecretAccessKeyKey is the key in the Secret holding the S3
+                              secret access key. Default "secretAccessKey".
+                            type: string
+                          secretName:
+                            description: SecretName is the Secret name in the controller's
+                              system namespace.
+                            maxLength: 253
+                            minLength: 1
+                            type: string
+                        required:
+                        - secretName
+                        type: object
+                      endpoint:
+                        description: |-
+                          Endpoint is the S3-compatible API endpoint without scheme,
+                          e.g. "minio.minio-system.svc.cluster.local:9000".
+                        maxLength: 512
+                        minLength: 3
+                        type: string
+                      pathPrefix:
+                        description: |-
+                          PathPrefix is prepended to every archive object key. Useful
+                          when one bucket carries archives from multiple clusters.
+                          Default "" (objects land at the bucket root).
+                        maxLength: 256
+                        type: string
+                      region:
+                        default: us-east-1
+                        description: |-
+                          Region is the S3 region. MinIO accepts any value; "us-east-1"
+                          is the conventional default for non-AWS S3 deployments.
+                        type: string
+                      useTLS:
+                        default: true
+                        description: |-
+                          UseTLS controls https vs http scheme on the endpoint URL.
+                          Default true. In-cluster MinIO with mTLS via Linkerd may set
+                          this to false (Linkerd handles transport security).
+                        type: boolean
+                    required:
+                    - bucket
+                    - credentialsRef
+                    - endpoint
+                    type: object
+                type: object
+              exportEndpoint:
+                description: |-
+                  ExportEndpoint optionally declares a SIEM / log-aggregator the
+                  manager streams entries to. Format:
+                    "otlp-http://collector:4318"
+                    "kafka://broker:9092/audit-topic"
+                    "webhook://https://siem.example.com/ingest"
+                  Empty disables external streaming — entries still land in etcd.
+                maxLength: 2048
+                type: string
+              retentionDays:
+                default: 2555
+                description: |-
+                  RetentionDays is the minimum retention for AuditEntries before a
+                  future cleanup job (Phase 12.3) may prune them. Default 2555 =
+                  ~7 years, which covers SOC 2 / PCI / HIPAA retention floors.
+                format: int32
+                maximum: 36500
+                minimum: 90
+                type: integer
+            type: object
+          status:
+            description: |-
+              AuditLogStatus carries the cluster-wide monotonic sequence counter.
+              Optimistic-concurrency updates on this subresource are what serialise
+              audit writes across manager replicas.
+            properties:
+              lastArchivedHash:
+                description: |-
+                  LastArchivedHash is the SelfHash of the highest-sequence
+                  AuditEntry in the most recent archive batch. Feeds chain
+                  integrity verification: when re-hydrating archived entries,
+                  the operator can confirm the genesis-to-LastArchivedHash chain
+                  remains intact end-to-end.
+                maxLength: 64
+                type: string
+              lastArchivedSequence:
+                description: |-
+                  LastArchivedSequence is the highest sequence number that has
+                  been successfully archived (uploaded to off-cluster storage AND
+                  deleted from etcd) by the retention controller. Zero when no
+                  entries have ever been archived. Always <= LastSequence.
+                format: int64
+                type: integer
+              lastArchivedTime:
+                description: |-
+                  LastArchivedTime records the timestamp of the most recent
+                  successful archive batch. Feeds the
+                  `keystone_audit_archive_lag_seconds` gauge — alert if this
+                  stops advancing past RetentionDays + 1d.
+                format: date-time
+                type: string
+              lastEntryHash:
+                description: |-
+                  LastEntryHash is the SelfHash of the most recently persisted
+                  AuditEntry. Writers use this as the PrevHash input for the next
+                  entry, so the chain stays linked across restarts.
+                maxLength: 64
+                type: string
+              lastEntryTime:
+                description: |-
+                  LastEntryTime is when the most recent entry was persisted. Feeds
+                  the `keystone_audit_last_entry_age_seconds` metric which should
+                  alert if the chain goes quiet unexpectedly.
+                format: date-time
+                type: string
+              lastSequence:
+                description: |-
+                  LastSequence is the highest sequence number that has been
+                  successfully persisted. Equals NextSequence-1 outside write
+                  windows. Surfaced for observability dashboards.
+                format: int64
+                type: integer
+              nextSequence:
+                description: |-
+                  NextSequence is the sequence number the next AuditEntry will be
+                  assigned. Starts at 1.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

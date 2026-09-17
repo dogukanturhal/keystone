@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Environment-tier approval policies — dev / staging / prod.
+#
+# These three SchemaPolicies show how to encode the canonical
+# enterprise gate: dev auto-admits, staging needs one peer review,
+# prod needs two peers plus a DBA. Apply all three with kubectl apply
+# and label MigrationBundles with `tier: dev|staging|prod` to route
+# them through the right set of gates.
+#
+# See docs/adrs/0016-approval-workflow-enforcement.md for the full
+# trust model (why annotations, not JWTs, in A3).
+---
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: SchemaPolicy
+metadata:
+  name: tier-dev-open
+spec:
+  # Every bundle labeled `tier: dev` matches. No approvalPolicies —
+  # dev tier is the fast feedback loop; the lint pack is the only gate.
+  targetSelector:
+    matchLabels:
+      tier: dev
+  minLintLevel: error
+  blockedKeywords: []
+---
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: SchemaPolicy
+metadata:
+  name: tier-staging-peer-review
+spec:
+  targetSelector:
+    matchLabels:
+      tier: staging
+  minLintLevel: error
+  approvalPolicies:
+    - name: peer-review
+      requiredApprovers: 1
+      fromGroups: [schema-reviewers]
+      disallowSelfApproval: true
+      # No appliesWhen → this policy fires for every tier=staging bundle.
+---
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: SchemaPolicy
+metadata:
+  name: tier-prod-strict
+spec:
+  targetSelector:
+    matchLabels:
+      tier: prod
+  minLintLevel: error
+  approvalPolicies:
+    - name: peer-review
+      requiredApprovers: 2
+      fromGroups: [schema-reviewers]
+      disallowSelfApproval: true
+    - name: dba
+      requiredApprovers: 1
+      fromGroups: [dba]
+      disallowSelfApproval: true
+      # RiskTier gating — only demand DBA sign-off when the bundle
+      # declares high or critical risk via the
+      # `keystone.hexxlock.io/risk-tier` annotation. Low-risk changes
+      # skip DBA review.
+      appliesWhen:
+        riskTier: high
+---
+# Example MigrationBundle annotated for the prod-strict policy.
+# Apply after all three SchemaPolicies above. The annotations encode
+# the N-of-M evidence the webhook counts.
+#
+# Annotation key shape:
+#   keystone.hexxlock.io/approval.<policy-name>.<approver-id>
+# Annotation value is the identity group the approver belongs to.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: MigrationBundle
+metadata:
+  name: users-service-v1
+  namespace: keystone-system
+  labels:
+    tier: prod
+    module: users
+  annotations:
+    keystone.hexxlock.io/author: alice@example.com
+    keystone.hexxlock.io/risk-tier: high
+    # 2-of-2 peer-reviewers + 1-of-1 DBA = all gates satisfied.
+    keystone.hexxlock.io/approval.peer-review.bob: schema-reviewers
+    keystone.hexxlock.io/approval.peer-review.carol: schema-reviewers
+    keystone.hexxlock.io/approval.dba.dave: dba
+spec:
+  version: v1.0.0
+  strategy: versioned
+  source:
+    type: ConfigMap
+    configMapRef:
+      name: users-service-migrations-v1
+  schemaSelector:
+    matchLabels:
+      module: users

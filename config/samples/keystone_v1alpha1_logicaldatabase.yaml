@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample LogicalDatabase — an existing shared database that already houses
+# a product's module schemas. The SchemaController ensures the database
+# exists with the requested extensions and owner role; it is idempotent, so
+# adopting a database that already exists is a no-op.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: LogicalDatabase
+metadata:
+  name: example-suite-core
+  namespace: keystone-system
+spec:
+  name: example_suite_core
+  clusterRef: prod-eu-west-1-hub
+  providerRef: example-pg
+  ownerRole: example_suite_core_owner
+  deletionPolicy: Retain  # safety default — never drop the DB on CR delete
+  extensions:
+    - uuid-ossp
+    - pgcrypto
+    - pg_stat_statements
+  encoding: UTF8
+  collation: C
+  ctype: C
+  connectionLimit: -1

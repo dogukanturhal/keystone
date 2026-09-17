@@ -1,0 +1,1566 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: schemadefinitions.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: SchemaDefinition
+    listKind: SchemaDefinitionList
+    plural: schemadefinitions
+    shortNames:
+    - sd
+    - schemadef
+    singular: schemadefinition
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.schemaRef
+      name: SchemaRef
+      type: string
+    - jsonPath: .spec.tables[*]
+      name: Tables
+      type: integer
+    - jsonPath: .status.pendingOperations
+      name: Pending
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SchemaDefinition declares the desired shape of a DatabaseSchema. The
+          controller diffs live state against this spec and auto-generates a
+          MigrationBundle with the necessary DDL. Atlas-parity DX for
+          declarative schema authoring.
+
+          Phase 10.1 ships the CRD only. Phase 10.2 ships the differ.
+          Phase 10.3 ships the reconciler.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SchemaDefinitionSpec is the declarative desired-state for one schema
+              or for a label-selected fan-out of schemas.
+
+              Exactly one of SchemaRef (singular) and SchemaSelector (fan-out)
+              must be set. Mixing both is rejected by admission. SchemaRef stays
+              the default for single-tenant definitions; SchemaSelector enables
+              one SchemaDefinition to drive every DatabaseSchema in a tenant pool
+              (the realm-DB pattern in example-service, business-module DBs in example-suite,
+              etc.) without per-tenant CR boilerplate.
+            properties:
+              allowDestructive:
+                default: false
+                description: |-
+                  AllowDestructive gates whether the differ may emit
+                  DROP TABLE / DROP COLUMN operations. Default false: the
+                  SchemaDefinitionReconciler refuses to plan destructive changes
+                  silently. Operators flip this on a per-SchemaDefinition basis
+                  when they've reviewed the diff and decided the drop is safe.
+                type: boolean
+              applyStrategy:
+                default: versioned
+                description: |-
+                  ApplyStrategy selects how the generated MigrationBundle is
+                  written: "versioned" (raw ALTER statements) or
+                  "pgroll-expand-contract" (zero-downtime for drop/rename/alter).
+                  Default "versioned" for greenfield schemas where locks are OK.
+                enum:
+                - versioned
+                - pgroll-expand-contract
+                type: string
+              cleanup:
+                description: |-
+                  Cleanup configures the per-SD TTL policy applied to terminal
+                  MigrationBundle and MigrationExecution CRs owned by this
+                  SchemaDefinition. Without this controller running, terminal CRs
+                  accumulate without bound — the 2026-05-08 incident demonstrated
+                  the failure mode at 182 954 AuditEntries / 4.7 GB etcd / 17 h
+                  apiserver outage. (AuditEntry has its own off-cluster archive
+                  path under spec.archive on AuditLog; this Cleanup field covers
+                  the operator's own transient bundles + executions whose payload
+                  stays on-cluster.)
+
+                  Nil = use the operator-wide defaults (24 h success / 7 d
+                  failure). Non-terminal CRs (Pending / Running / Expanding /
+                  Aborting / RollingBack) are NEVER deleted regardless of age —
+                  the controller only acts on Succeeded / Failed / Aborted /
+                  RolledBack / RollbackFailed phases. The latest succeeded
+                  MigrationBundle and the latest succeeded MigrationExecution per
+                  (SD, schema) tuple are always retained so the SD reconciler can
+                  re-emit decisions and operators can read "what last shipped".
+
+                  Behind the operator-level --enable-cr-ttl feature flag (default
+                  off for first release) so existing clusters opt in deliberately.
+                properties:
+                  retainFailureFor:
+                    description: |-
+                      RetainFailureFor is how long to keep a Failed / Aborted /
+                      RollbackFailed MigrationBundle or MigrationExecution before
+                      garbage collection. Failures need a longer post-mortem window
+                      than successes — the on-call engineer who picks up the page on
+                      Friday afternoon needs the failure CR to still exist Monday
+                      morning. 7d default matches the standard "two weekend windows"
+                      rule.
+
+                      Empty / nil = use the operator-wide default (7d).
+                    type: string
+                  retainSuccessFor:
+                    description: |-
+                      RetainSuccessFor is how long to keep a Succeeded MigrationBundle
+                      or MigrationExecution before garbage collection. The latest
+                      Succeeded CR per kind is ALWAYS retained regardless of age — the
+                      SD reconciler reads it for re-emit decisions and the operator
+                      uses it to answer "what last shipped". This field controls the
+                      retention window for older Succeeded siblings, where one
+                      generation per fan-out tenant accumulates at every reconcile.
+
+                      Operators wanting longer post-mortem windows on success can bump
+                      this to 7d or more. The 2026-05-08 outage post-mortem suggests
+                      24 h is the right default: long enough for humans to see the
+                      rollout in `kubectl get mb -A`, short enough that a 100-tenant
+                      fan-out reconciling every 30 min doesn't accumulate beyond
+                      O(thousands).
+
+                      Empty / nil = use the operator-wide default (24h).
+                    type: string
+                type: object
+              defaultPrivileges:
+                description: |-
+                  DefaultPrivileges declares per-role `ALTER DEFAULT PRIVILEGES`
+                  that should hold against this schema. Every entry expands at
+                  reconcile time to:
+
+                    ALTER DEFAULT PRIVILEGES FOR ROLE <ForRole>
+                      IN SCHEMA <Schema OR sd.targetSchema>
+                      GRANT <Privileges> ON <ObjectType> TO <ToRole>;
+
+                  Why this exists (gap surfaced 2026-05-12 on example-service migration
+                  234): the operator-emitted bundles run CREATE TABLE as the
+                  keystone_admin role. Pre-Keystone default-privileges were set
+                  for the `postgres` role, so any keystone_admin-created table
+                  silently dropped out of the falcon_id_app grant chain. The
+                  BackchannelLogoutDrainer spammed SQLSTATE 42501 every 5s until
+                  a hand-authored migration bundle re-pointed ALTER DEFAULT
+                  PRIVILEGES at keystone_admin. With DefaultPrivileges declared
+                  here, that recovery is no longer hand-authored — the SD
+                  reconciler emits the ALTER DEFAULT PRIVILEGES statement as part
+                  of the bundle so every future keystone_admin-created table
+                  inherits the grant chain automatically.
+                items:
+                  description: "DesiredDefaultPrivilege expresses one `ALTER DEFAULT
+                    PRIVILEGES`\nstatement that the SD reconciler emits as part of
+                    the bundle.\n\nSemantics:\n\n\tALTER DEFAULT PRIVILEGES FOR ROLE
+                    <ForRole>\n\t  IN SCHEMA <Schema OR sd.targetSchema>\n\t  GRANT
+                    <Privileges> ON <ObjectType> TO <ToRole>;\n\nIdempotent in PostgreSQL
+                    — re-issuing the same grant against the\nsame role/schema/object-type
+                    is a no-op (pg_default_acl uniqueness).\n\nPractical example for
+                    the example-service 2026-05-12 fix:\n\n\tdefaultPrivileges:\n\t  - forRole:
+                    keystone_admin\n\t    toRole:  falcon_id_app\n\t    objectType:
+                    tables\n\t    privileges: [SELECT, INSERT, UPDATE, DELETE, TRUNCATE,
+                    REFERENCES, TRIGGER]\n\t  - forRole: keystone_admin\n\t    toRole:
+                    \ falcon_id_app\n\t    objectType: sequences\n\t    privileges:
+                    [USAGE, SELECT, UPDATE]"
+                  properties:
+                    forRole:
+                      description: |-
+                        ForRole is the PG role whose CREATE actions the grant attaches
+                        to. For Keystone-managed schemas this is typically the role the
+                        operator runs migrations as — `keystone_admin`. Required.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    objectType:
+                      description: |-
+                        ObjectType is the PG default-privileges object class. Mirrors
+                        the keyword that follows ON in PostgreSQL's
+                        `ALTER DEFAULT PRIVILEGES ... ON <ObjectType>` syntax. Common
+                        values: tables, sequences, functions, types.
+                      enum:
+                      - tables
+                      - sequences
+                      - functions
+                      - types
+                      - schemas
+                      type: string
+                    privileges:
+                      description: |-
+                        Privileges is the privilege set granted. Validated against the
+                        PG privilege keywords valid for the given ObjectType — e.g.
+                        `tables` accepts SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES
+                        /TRIGGER/MAINTAIN; `sequences` accepts USAGE/SELECT/UPDATE.
+                        The literal string `ALL` is also accepted (Keystone analyzers
+                        surface a warning for the GRANT-ALL footgun via the
+                        `no-grant-all` rule.)
+                      items:
+                        type: string
+                      maxItems: 16
+                      minItems: 1
+                      type: array
+                    schema:
+                      description: |-
+                        Schema names the schema the default-privileges apply IN. When
+                        empty, defaults to the SchemaDefinition's target schema (i.e.
+                        the schema resolved via SchemaRef or SchemaSelector). Use
+                        "public" for the public schema.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    toRole:
+                      description: ToRole is the PG role receiving the granted privileges.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    withGrantOption:
+                      description: |-
+                        WithGrantOption mirrors the SQL `WITH GRANT OPTION` clause.
+                        When true the receiving role can re-grant the privileges to
+                        other roles. Default false.
+                      type: boolean
+                  required:
+                  - forRole
+                  - objectType
+                  - privileges
+                  - toRole
+                  type: object
+                maxItems: 64
+                type: array
+              enums:
+                description: |-
+                  Enums are PostgreSQL enum types. Created before tables that
+                  reference them. Drop requires AllowDestructive.
+                items:
+                  description: DesiredEnum declares a PostgreSQL enum type.
+                  properties:
+                    name:
+                      description: Name is the enum type name.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    values:
+                      description: Values is the ordered list of enum labels.
+                      items:
+                        type: string
+                      maxItems: 256
+                      minItems: 1
+                      type: array
+                  required:
+                  - name
+                  - values
+                  type: object
+                maxItems: 256
+                type: array
+              extensions:
+                description: |-
+                  Extensions are PostgreSQL extensions the schema depends on.
+                  Created before everything else, since types and default
+                  expressions can come from them.
+                items:
+                  description: |-
+                    DesiredExtension declares a PostgreSQL extension the schema depends on
+                    (pgcrypto for gen_random_uuid(), citext, postgis, …).
+
+                    Extensions are part of the desired state because they are a
+                    prerequisite for it: a column defaulting to gen_random_uuid() fails to
+                    create unless pgcrypto exists. Without this the differ cannot tell an
+                    extension-provided object from drift, and re-creates or drops objects
+                    the extension owns.
+                  properties:
+                    name:
+                      description: Name is the extension name as CREATE EXTENSION
+                        spells it.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_-]*$
+                      type: string
+                    schema:
+                      description: |-
+                        Schema pins the extension to a specific schema. Empty installs it
+                        wherever the target's search_path puts it, which is the right
+                        default: extensions are commonly shared across schemas, and pinning
+                        one to the schema currently being diffed would make the desired
+                        state non-portable between environments.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                  required:
+                  - name
+                  type: object
+                maxItems: 64
+                type: array
+              functions:
+                description: |-
+                  Functions are PostgreSQL functions/procedures. Created after all
+                  referenced types and tables.
+                items:
+                  description: DesiredFunction declares a PostgreSQL function or procedure.
+                  properties:
+                    args:
+                      description: |-
+                        Args is the argument signature (e.g., "p_id uuid, p_name text").
+                        Empty string for zero-argument functions.
+                      maxLength: 2048
+                      type: string
+                    body:
+                      description: Body is the function body (between $$ delimiters).
+                      maxLength: 65536
+                      type: string
+                    language:
+                      default: plpgsql
+                      description: Language is the PG language.
+                      enum:
+                      - plpgsql
+                      - sql
+                      - c
+                      - internal
+                      type: string
+                    name:
+                      description: Name is the function name.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    replace:
+                      default: true
+                      description: |-
+                        Replace controls CREATE OR REPLACE semantics. Default true
+                        because functions are safely replaceable.
+                      type: boolean
+                    returns:
+                      description: Returns is the return type (e.g., "void", "TABLE(id
+                        uuid, name text)").
+                      maxLength: 2048
+                      type: string
+                  required:
+                  - body
+                  - name
+                  - returns
+                  type: object
+                maxItems: 256
+                type: array
+              materializedViews:
+                description: |-
+                  MaterializedViews are PostgreSQL materialized views. Created
+                  after all referenced tables. Support indexes for query perf.
+                items:
+                  description: DesiredMaterializedView declares a PostgreSQL materialized
+                    view.
+                  properties:
+                    indexes:
+                      description: Indexes on the materialized view (optional, for
+                        query performance).
+                      items:
+                        description: |-
+                          DesiredIndex is one index declaration.
+
+                          Three column-spec shapes are supported (use exactly one):
+                            1. Columns []string                 — simple; one btree col per entry,
+                                                                   ASC default, no opclass.
+                            2. ColumnRefs []DesiredIndexColumn   — rich; per-column ASC/DESC,
+                                                                   NULLS FIRST/LAST, opclass.
+                            3. Expression string                 — single expression-index body
+                                                                   (e.g. "lower(email)" or
+                                                                   "coalesce(deleted_at, 'epoch')").
+
+                          All four index features unblocked by this set:
+                            - sort direction per column          (ColumnRefs[i].Direction)
+                            - expression indexes                 (Expression)
+                            - covering / INCLUDE columns         (Include)
+                            - per-column opclass                 (ColumnRefs[i].OpClass)
+                            - partial-index predicate            (Where, already present)
+
+                          Designed for backwards compat: existing CRs using `Columns []string`
+                          keep working unchanged. The Webhook validator (Phase 4 — separate
+                          concern) enforces "exactly one of Columns/ColumnRefs/Expression".
+                        properties:
+                          columnRefs:
+                            description: |-
+                              ColumnRefs is the rich-form column list. Each entry can specify
+                              per-column sort direction (ASC/DESC), null ordering (NULLS FIRST/
+                              LAST), and operator class (e.g. varchar_pattern_ops for LIKE
+                              optimisation). Mutually exclusive with Columns and Expression.
+                            items:
+                              description: |-
+                                DesiredIndexColumn is one column entry in DesiredIndex.ColumnRefs.
+
+                                Exactly one of Name or Expression must be set. Name is for direct
+                                column references (the common case); Expression is for per-column
+                                SQL expressions like `lower(email)` or `coalesce(rule_value, '')`.
+                                PostgreSQL allows mixing column refs and expressions in a single
+                                multi-column index — this struct accommodates either shape.
+                              properties:
+                                direction:
+                                  description: |-
+                                    Direction selects the per-column sort order. PG default is asc;
+                                    desc materially changes the index for ORDER BY queries.
+
+                                    No `+kubebuilder:default` marker — apiserver-side defaulting
+                                    materialises the field on every stored object even when the
+                                    source omits it, which then surfaces as spurious drift to
+                                    SSA-based diff (every Argo sync reports OutOfSync because git
+                                    has no `direction` field while live has `direction: asc`). The
+                                    differ already treats the empty string as "asc" semantically
+                                    (see internal/migration/declarative/differ.go renderIndexColumn),
+                                    so the marker added behaviour the differ doesn't need but the
+                                    admission path materialised verbosely.
+                                  enum:
+                                  - asc
+                                  - desc
+                                  type: string
+                                expression:
+                                  description: |-
+                                    Expression is a per-column SQL expression body (e.g.
+                                    `coalesce(col, '')` or `lower(email)`). The renderer wraps it
+                                    in parens. Mutually exclusive with Name. Type-cast literals
+                                    like `'x'::uuid` and function calls are permitted; the bodies
+                                    are emitted verbatim — operator MUST treat them as
+                                    trusted-input (in practice keystonectl-inspect generates them
+                                    from pg_get_indexdef which is the SOURCE OF TRUTH from the
+                                    live database).
+                                  maxLength: 1024
+                                  type: string
+                                name:
+                                  description: |-
+                                    Name of the column. Quoted as identifier on render. Mutually
+                                    exclusive with Expression.
+                                  maxLength: 63
+                                  pattern: ^[a-z_][a-z0-9_]*$
+                                  type: string
+                                nulls:
+                                  description: |-
+                                    Nulls selects null ordering. PG default depends on Direction
+                                    (asc -> nulls last; desc -> nulls first). Override here if the
+                                    query plans need a non-default placement.
+                                  enum:
+                                  - first
+                                  - last
+                                  type: string
+                                opClass:
+                                  description: |-
+                                    OpClass is an optional per-column operator class. Common cases:
+                                      varchar_pattern_ops    — LIKE 'prefix%' optimisation
+                                      text_pattern_ops       — same for text columns
+                                      gin_trgm_ops           — pg_trgm fuzzy match
+                                      jsonb_path_ops         — JSON @> queries on jsonb cols
+                                    The string is emitted verbatim as a quoted identifier.
+                                  maxLength: 63
+                                  pattern: ^[a-z_][a-z0-9_]*$
+                                  type: string
+                              type: object
+                            maxItems: 32
+                            minItems: 1
+                            type: array
+                          columns:
+                            description: |-
+                              Columns the index covers, in order. Simple form: one btree column
+                              per entry, ASC sort, no opclass. Mutually exclusive with
+                              ColumnRefs and Expression.
+                            items:
+                              type: string
+                            maxItems: 32
+                            minItems: 1
+                            type: array
+                          expression:
+                            description: |-
+                              Expression is a single index-expression body, used for expression
+                              indexes like CREATE INDEX foo ON t (lower(email)). The string is
+                              emitted verbatim wrapped in parens; do NOT include `CREATE INDEX`
+                              or column-list parens. Mutually exclusive with Columns and
+                              ColumnRefs.
+                            maxLength: 1024
+                            type: string
+                          include:
+                            description: |-
+                              Include is the optional INCLUDE clause for covering indexes
+                              (PostgreSQL 11+). Listed columns are stored in the index leaf
+                              pages but not used as the index key, enabling index-only scans
+                              for queries that select these columns alongside an index probe.
+                              Method MUST be btree (PG limitation).
+                            items:
+                              type: string
+                            maxItems: 32
+                            type: array
+                          method:
+                            default: btree
+                            description: |-
+                              Method selects the PG index method (btree default, gin, gist,
+                              hash, brin, spgist). INCLUDE only valid with btree.
+                            enum:
+                            - btree
+                            - hash
+                            - gin
+                            - gist
+                            - brin
+                            - spgist
+                            type: string
+                          name:
+                            description: Name of the index.
+                            maxLength: 63
+                            pattern: ^[a-z_][a-z0-9_]*$
+                            type: string
+                          nullsNotDistinct:
+                            description: |-
+                              NullsNotDistinct controls how NULL values are deduplicated in a
+                              UNIQUE index (PostgreSQL 15+). Default behaviour (NULLS DISTINCT)
+                              treats every NULL as distinct, allowing many rows with NULL in
+                              the indexed column. NULLS NOT DISTINCT treats all NULLs as equal
+                              for uniqueness — at most one row may have NULL.
+
+                              Only meaningful when Unique=true. Ignored otherwise.
+                            type: boolean
+                          unique:
+                            description: Unique controls UNIQUE constraint on the
+                              index.
+                            type: boolean
+                          where:
+                            description: |-
+                              Where is an optional partial-index predicate. The string is
+                              emitted verbatim after the WHERE keyword; do NOT include the
+                              keyword itself.
+                            maxLength: 1024
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      maxItems: 32
+                      type: array
+                    name:
+                      description: Name is the materialized view name.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    query:
+                      description: Query is the SELECT statement backing the materialized
+                        view.
+                      maxLength: 65536
+                      type: string
+                    withData:
+                      default: true
+                      description: |-
+                        WithData controls whether the view is populated on creation.
+                        Default true. Set false for large views where you want to
+                        REFRESH MATERIALIZED VIEW CONCURRENTLY on a schedule.
+                      type: boolean
+                  required:
+                  - name
+                  - query
+                  type: object
+                maxItems: 128
+                type: array
+              mixedVersionPolicy:
+                default: Refuse
+                description: |-
+                  MixedVersionPolicy governs reconciler behaviour when
+                  SchemaSelector matches multiple schemas whose observed shapes
+                  diverge. Ignored when SchemaRef (singular) is used.
+                enum:
+                - Refuse
+                - MostBehindWins
+                type: string
+              policies:
+                description: |-
+                  Policies are PostgreSQL row-level security policies. Requires
+                  enableRLS=true on the target table.
+                items:
+                  description: DesiredPolicy declares a PostgreSQL row-level security
+                    policy.
+                  properties:
+                    command:
+                      default: ALL
+                      description: Command is the SQL command the policy applies to.
+                      enum:
+                      - ALL
+                      - SELECT
+                      - INSERT
+                      - UPDATE
+                      - DELETE
+                      type: string
+                    name:
+                      description: Name is the policy name.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    permissive:
+                      default: true
+                      description: |-
+                        Permissive controls whether the policy is permissive or
+                        restrictive. Default true (PERMISSIVE).
+                      type: boolean
+                    roles:
+                      description: |-
+                        Roles is the list of roles the policy applies to.
+                        Empty or ["public"] means all roles.
+                      items:
+                        type: string
+                      maxItems: 16
+                      type: array
+                    table:
+                      description: Table is the table this policy applies to.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    using:
+                      description: |-
+                        Using is the USING expression (row visibility filter).
+                        Applied to SELECT, UPDATE, DELETE.
+                      maxLength: 4096
+                      type: string
+                    withCheck:
+                      description: |-
+                        WithCheck is the WITH CHECK expression (row write filter).
+                        Applied to INSERT, UPDATE.
+                      maxLength: 4096
+                      type: string
+                  required:
+                  - name
+                  - table
+                  type: object
+                maxItems: 256
+                type: array
+              policyRef:
+                description: |-
+                  PolicyRef is the SchemaPolicy the reconciler stamps onto the
+                  auto-generated MigrationBundle. When empty, the default
+                  "production-safety" policy is applied — this matches the value
+                  used by every hand-authored bundle in the GitOps repository
+                  and ensures the downstream MigrationBundle controller has a
+                  policy to look up (without a policyRef, the bundle pipeline
+                  stalls before creating a MigrationPlan).
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              schemaRef:
+                description: |-
+                  SchemaRef is the DatabaseSchema CR this definition applies to
+                  (same namespace). Mutually exclusive with SchemaSelector.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              schemaSelector:
+                description: |-
+                  SchemaSelector matches every DatabaseSchema in the same namespace
+                  whose labels satisfy the selector. The reconciler resolves all
+                  matched schemas, computes a per-schema diff, and (subject to
+                  MixedVersionPolicy) emits one MigrationBundle whose
+                  schemaSelector mirrors this one — the bundle's existing fan-out
+                  at apply time then runs against every matched schema.
+
+                  An empty selector ({}) matches everything in-namespace and is
+                  rejected by admission to prevent foot-guns; specify at least one
+                  matchLabels entry. Mutually exclusive with SchemaRef.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              sequences:
+                description: |-
+                  Sequences are PostgreSQL sequences. Created before tables that
+                  use them as DEFAULT values.
+                items:
+                  description: DesiredSequence declares a PostgreSQL sequence.
+                  properties:
+                    dataType:
+                      default: bigint
+                      description: DataType is the sequence's data type (smallint,
+                        integer, bigint).
+                      enum:
+                      - smallint
+                      - integer
+                      - bigint
+                      type: string
+                    incrementBy:
+                      default: 1
+                      description: IncrementBy is the step value.
+                      format: int64
+                      minimum: 1
+                      type: integer
+                    maxValue:
+                      description: MaxValue is the maximum value. 0 means PG default.
+                      format: int64
+                      type: integer
+                    minValue:
+                      description: MinValue is the minimum value. 0 means PG default.
+                      format: int64
+                      type: integer
+                    name:
+                      description: Name is the sequence name.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    ownedBy:
+                      description: |-
+                        OwnedBy ties the sequence to a column (schema "table.column" format).
+                        When the owning column is dropped, the sequence is too.
+                      maxLength: 127
+                      type: string
+                    startWith:
+                      description: StartWith is the starting value. 0 means PG default.
+                      format: int64
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                maxItems: 256
+                type: array
+              tables:
+                description: Tables is the ordered list of desired tables.
+                items:
+                  description: DesiredTable describes one table's desired shape.
+                  properties:
+                    checkConstraints:
+                      description: |-
+                        CheckConstraints declares table-level CHECK constraints that must
+                        hold for the table. Each entry expands at reconcile time to:
+
+                          ALTER TABLE <Name> ADD CONSTRAINT <Name> CHECK (<Definition>);
+
+                        Drop is gated by SchemaDefinitionSpec.AllowDestructive — without
+                        it, removed entries from this list produce a warning and are not
+                        emitted, identical to the column-drop policy. Definition is
+                        passed verbatim into the SQL CHECK clause; the SDK does NOT
+                        canonicalise expressions, so an exact textual match against the
+                        existing pg_constraint definition is required for the differ to
+                        recognise an unchanged constraint as already-applied.
+                      items:
+                        description: |-
+                          DesiredCheckConstraint is one table-level CHECK constraint.
+
+                          Single-column CHECKs can also be expressed via DesiredColumn.Check
+                          (when shipped as a future API addition); use this list for
+                          multi-column predicates and named constraints that integration
+                          tests assert by name.
+                        properties:
+                          definition:
+                            description: |-
+                              Definition is the predicate expression to enforce, exactly as
+                              it would appear inside the CHECK (...) parentheses. The differ
+                              does NOT canonicalise this string before comparing to
+                              pg_constraint.consrc — produce it via the same expression
+                              printer keystonectl uses to avoid spurious diffs.
+                            maxLength: 1024
+                            minLength: 1
+                            type: string
+                          name:
+                            description: |-
+                              Name of the constraint. Must be unique within the table and
+                              follow the standard PG identifier rules (snake_case, max 63
+                              chars, leading underscore allowed).
+                            maxLength: 63
+                            pattern: ^[a-z_][a-z0-9_]*$
+                            type: string
+                        required:
+                        - definition
+                        - name
+                        type: object
+                      maxItems: 32
+                      type: array
+                    columns:
+                      description: Columns is the ordered list of columns.
+                      items:
+                        description: DesiredColumn is one column declaration.
+                        properties:
+                          default:
+                            description: Default is the column DEFAULT clause. Empty
+                              = no default.
+                            maxLength: 512
+                            type: string
+                          generated:
+                            description: |-
+                              Generated is the expression of a STORED generated column —
+                              `GENERATED ALWAYS AS (<expr>) STORED`. Empty means an ordinary
+                              column.
+
+                              Only STORED is modelled. PostgreSQL had no other kind before 18,
+                              and the inspector reads the expression back from a stored column;
+                              when VIRTUAL becomes a target, it arrives as a sibling field rather
+                              than by overloading this one.
+
+                              Mutually exclusive with Default and with Identity: a generated
+                              column computes its value, so a DEFAULT or an identity sequence has
+                              nothing to apply to.
+                            maxLength: 2048
+                            type: string
+                          identity:
+                            description: |-
+                              Identity declares the column as a PostgreSQL identity column:
+                              `GENERATED ALWAYS AS IDENTITY` or `GENERATED BY DEFAULT AS
+                              IDENTITY`. Empty means an ordinary column.
+
+                              The two spellings are not cosmetic. Under ALWAYS, PostgreSQL
+                              rejects a user-supplied value unless the INSERT says OVERRIDING
+                              SYSTEM VALUE; under BY DEFAULT the user's value wins. Collapsing
+                              them would silently change whether an application's inserts are
+                              accepted, so the distinction is carried through the desired state
+                              rather than normalised away.
+
+                              Values are the SQL keywords rather than CamelCase, matching the
+                              rest of this API (ColumnType carries raw PostgreSQL type names,
+                              DesiredIndex.Method carries "btree"), and matching what the
+                              inspector reads back out of pg_attribute.attidentity.
+
+                              Identity implies NOT NULL — PostgreSQL marks such columns NOT NULL
+                              automatically — but it does NOT imply uniqueness: a sequence can be
+                              reset or a value inserted by hand, so a PRIMARY KEY or UNIQUE
+                              constraint is still required to guarantee it.
+                            enum:
+                            - ""
+                            - ALWAYS
+                            - BY DEFAULT
+                            type: string
+                          name:
+                            description: Name is the column identifier.
+                            maxLength: 63
+                            pattern: ^[a-z_][a-z0-9_]*$
+                            type: string
+                          nullable:
+                            default: true
+                            description: |-
+                              Nullable controls NOT NULL. Default true because declaring a
+                              NOT NULL column without a default on an existing populated table
+                              requires a backfill dance; the differ will refuse to plan that.
+
+                              `omitempty` was removed deliberately: keystonectl-inspect-generated
+                              SchemaDefinitions emit `nullable: false` for NOT NULL columns; with
+                              `omitempty` the false value would be stripped from JSON, K8s would
+                              then apply the kubebuilder default of `true` at admission, and
+                              every NOT NULL column would round-trip into the cluster as nullable
+                              — producing thousands of bogus ALTER TABLE ops on every reconcile.
+                              Always emit the field so the admission defaulter only fires when
+                              the user genuinely omits it.
+                            type: boolean
+                          primaryKey:
+                            description: |-
+                              PrimaryKey marks the column as the table's single-column PK.
+                              For composite PKs, use DesiredTable.PrimaryKey instead.
+                            type: boolean
+                          type:
+                            description: |-
+                              Type is the PostgreSQL data type (no default — every column must
+                              declare it explicitly).
+                            maxLength: 128
+                            pattern: ^[a-z][a-z0-9_ (),\[\]]*$
+                            type: string
+                        required:
+                        - name
+                        - nullable
+                        - type
+                        type: object
+                      maxItems: 128
+                      minItems: 1
+                      type: array
+                    enableRLS:
+                      description: |-
+                        EnableRLS enables row-level security on this table. When true,
+                        the differ emits ALTER TABLE ... ENABLE ROW LEVEL SECURITY.
+                        Policies are declared in spec.policies[].
+                      type: boolean
+                    forceRLS:
+                      description: |-
+                        ForceRLS controls whether row-level security also applies to the
+                        table's OWNER (ALTER TABLE ... FORCE ROW LEVEL SECURITY). Ignored
+                        unless EnableRLS is true.
+
+                        Unset means true. That default is deliberate and is the safe one:
+                        PostgreSQL exempts a table's owner from its own policies, so
+                        ENABLE-without-FORCE leaves every policy in place while enforcing
+                        none of them against an application that connects as the owning role
+                        — which is the ordinary deployment shape. A field that defaulted to
+                        false would mean a SchemaDefinition asking for row-level security
+                        got, silently, a schema that did not enforce it.
+
+                        It is a pointer so that "unset" and "explicitly false" are
+                        distinguishable. Explicitly false is a real configuration — it fits a
+                        schema whose owner is a migration role that must retain unrestricted
+                        access — and it is honoured, but it has to be asked for. Before this
+                        field existed the differ emitted FORCE unconditionally alongside
+                        ENABLE, so leaving it unset preserves exactly that behaviour and no
+                        existing SchemaDefinition changes meaning.
+                      type: boolean
+                    foreignKeys:
+                      description: ForeignKeys declared on this table.
+                      items:
+                        description: DesiredForeignKey is one foreign key declaration.
+                        properties:
+                          columns:
+                            description: Columns in this table referencing the target.
+                            items:
+                              type: string
+                            maxItems: 8
+                            minItems: 1
+                            type: array
+                          name:
+                            description: Name of the constraint.
+                            maxLength: 63
+                            pattern: ^[a-z_][a-z0-9_]*$
+                            type: string
+                          onDelete:
+                            default: NO ACTION
+                            description: OnDelete action — CASCADE, SET NULL, SET
+                              DEFAULT, RESTRICT, NO ACTION.
+                            enum:
+                            - CASCADE
+                            - SET NULL
+                            - SET DEFAULT
+                            - RESTRICT
+                            - NO ACTION
+                            type: string
+                          referencesColumns:
+                            description: ReferencesColumns is the target column list.
+                            items:
+                              type: string
+                            maxItems: 8
+                            minItems: 1
+                            type: array
+                          referencesTable:
+                            description: |-
+                              ReferencesTable is the target table name (same schema as the
+                              containing SchemaDefinition — cross-schema FKs are deliberately
+                              out of scope for v1alpha1).
+                            maxLength: 63
+                            pattern: ^[a-z_][a-z0-9_]*$
+                            type: string
+                        required:
+                        - columns
+                        - name
+                        - referencesColumns
+                        - referencesTable
+                        type: object
+                      maxItems: 32
+                      type: array
+                    indexes:
+                      description: Indexes declared on this table.
+                      items:
+                        description: |-
+                          DesiredIndex is one index declaration.
+
+                          Three column-spec shapes are supported (use exactly one):
+                            1. Columns []string                 — simple; one btree col per entry,
+                                                                   ASC default, no opclass.
+                            2. ColumnRefs []DesiredIndexColumn   — rich; per-column ASC/DESC,
+                                                                   NULLS FIRST/LAST, opclass.
+                            3. Expression string                 — single expression-index body
+                                                                   (e.g. "lower(email)" or
+                                                                   "coalesce(deleted_at, 'epoch')").
+
+                          All four index features unblocked by this set:
+                            - sort direction per column          (ColumnRefs[i].Direction)
+                            - expression indexes                 (Expression)
+                            - covering / INCLUDE columns         (Include)
+                            - per-column opclass                 (ColumnRefs[i].OpClass)
+                            - partial-index predicate            (Where, already present)
+
+                          Designed for backwards compat: existing CRs using `Columns []string`
+                          keep working unchanged. The Webhook validator (Phase 4 — separate
+                          concern) enforces "exactly one of Columns/ColumnRefs/Expression".
+                        properties:
+                          columnRefs:
+                            description: |-
+                              ColumnRefs is the rich-form column list. Each entry can specify
+                              per-column sort direction (ASC/DESC), null ordering (NULLS FIRST/
+                              LAST), and operator class (e.g. varchar_pattern_ops for LIKE
+                              optimisation). Mutually exclusive with Columns and Expression.
+                            items:
+                              description: |-
+                                DesiredIndexColumn is one column entry in DesiredIndex.ColumnRefs.
+
+                                Exactly one of Name or Expression must be set. Name is for direct
+                                column references (the common case); Expression is for per-column
+                                SQL expressions like `lower(email)` or `coalesce(rule_value, '')`.
+                                PostgreSQL allows mixing column refs and expressions in a single
+                                multi-column index — this struct accommodates either shape.
+                              properties:
+                                direction:
+                                  description: |-
+                                    Direction selects the per-column sort order. PG default is asc;
+                                    desc materially changes the index for ORDER BY queries.
+
+                                    No `+kubebuilder:default` marker — apiserver-side defaulting
+                                    materialises the field on every stored object even when the
+                                    source omits it, which then surfaces as spurious drift to
+                                    SSA-based diff (every Argo sync reports OutOfSync because git
+                                    has no `direction` field while live has `direction: asc`). The
+                                    differ already treats the empty string as "asc" semantically
+                                    (see internal/migration/declarative/differ.go renderIndexColumn),
+                                    so the marker added behaviour the differ doesn't need but the
+                                    admission path materialised verbosely.
+                                  enum:
+                                  - asc
+                                  - desc
+                                  type: string
+                                expression:
+                                  description: |-
+                                    Expression is a per-column SQL expression body (e.g.
+                                    `coalesce(col, '')` or `lower(email)`). The renderer wraps it
+                                    in parens. Mutually exclusive with Name. Type-cast literals
+                                    like `'x'::uuid` and function calls are permitted; the bodies
+                                    are emitted verbatim — operator MUST treat them as
+                                    trusted-input (in practice keystonectl-inspect generates them
+                                    from pg_get_indexdef which is the SOURCE OF TRUTH from the
+                                    live database).
+                                  maxLength: 1024
+                                  type: string
+                                name:
+                                  description: |-
+                                    Name of the column. Quoted as identifier on render. Mutually
+                                    exclusive with Expression.
+                                  maxLength: 63
+                                  pattern: ^[a-z_][a-z0-9_]*$
+                                  type: string
+                                nulls:
+                                  description: |-
+                                    Nulls selects null ordering. PG default depends on Direction
+                                    (asc -> nulls last; desc -> nulls first). Override here if the
+                                    query plans need a non-default placement.
+                                  enum:
+                                  - first
+                                  - last
+                                  type: string
+                                opClass:
+                                  description: |-
+                                    OpClass is an optional per-column operator class. Common cases:
+                                      varchar_pattern_ops    — LIKE 'prefix%' optimisation
+                                      text_pattern_ops       — same for text columns
+                                      gin_trgm_ops           — pg_trgm fuzzy match
+                                      jsonb_path_ops         — JSON @> queries on jsonb cols
+                                    The string is emitted verbatim as a quoted identifier.
+                                  maxLength: 63
+                                  pattern: ^[a-z_][a-z0-9_]*$
+                                  type: string
+                              type: object
+                            maxItems: 32
+                            minItems: 1
+                            type: array
+                          columns:
+                            description: |-
+                              Columns the index covers, in order. Simple form: one btree column
+                              per entry, ASC sort, no opclass. Mutually exclusive with
+                              ColumnRefs and Expression.
+                            items:
+                              type: string
+                            maxItems: 32
+                            minItems: 1
+                            type: array
+                          expression:
+                            description: |-
+                              Expression is a single index-expression body, used for expression
+                              indexes like CREATE INDEX foo ON t (lower(email)). The string is
+                              emitted verbatim wrapped in parens; do NOT include `CREATE INDEX`
+                              or column-list parens. Mutually exclusive with Columns and
+                              ColumnRefs.
+                            maxLength: 1024
+                            type: string
+                          include:
+                            description: |-
+                              Include is the optional INCLUDE clause for covering indexes
+                              (PostgreSQL 11+). Listed columns are stored in the index leaf
+                              pages but not used as the index key, enabling index-only scans
+                              for queries that select these columns alongside an index probe.
+                              Method MUST be btree (PG limitation).
+                            items:
+                              type: string
+                            maxItems: 32
+                            type: array
+                          method:
+                            default: btree
+                            description: |-
+                              Method selects the PG index method (btree default, gin, gist,
+                              hash, brin, spgist). INCLUDE only valid with btree.
+                            enum:
+                            - btree
+                            - hash
+                            - gin
+                            - gist
+                            - brin
+                            - spgist
+                            type: string
+                          name:
+                            description: Name of the index.
+                            maxLength: 63
+                            pattern: ^[a-z_][a-z0-9_]*$
+                            type: string
+                          nullsNotDistinct:
+                            description: |-
+                              NullsNotDistinct controls how NULL values are deduplicated in a
+                              UNIQUE index (PostgreSQL 15+). Default behaviour (NULLS DISTINCT)
+                              treats every NULL as distinct, allowing many rows with NULL in
+                              the indexed column. NULLS NOT DISTINCT treats all NULLs as equal
+                              for uniqueness — at most one row may have NULL.
+
+                              Only meaningful when Unique=true. Ignored otherwise.
+                            type: boolean
+                          unique:
+                            description: Unique controls UNIQUE constraint on the
+                              index.
+                            type: boolean
+                          where:
+                            description: |-
+                              Where is an optional partial-index predicate. The string is
+                              emitted verbatim after the WHERE keyword; do NOT include the
+                              keyword itself.
+                            maxLength: 1024
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      maxItems: 32
+                      type: array
+                    name:
+                      description: Name of the table.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    primaryKey:
+                      description: |-
+                        PrimaryKey is the composite primary-key column list. Use this for
+                        multi-column PKs; single-column PKs can also use
+                        DesiredColumn.PrimaryKey as a shorthand.
+                      items:
+                        type: string
+                      maxItems: 8
+                      type: array
+                    primaryKeyName:
+                      description: |-
+                        PrimaryKeyName names the PRIMARY KEY constraint. Empty lets
+                        PostgreSQL derive it, which yields `<table>_pkey`.
+
+                        Set it to reproduce a schema whose primary key was named
+                        explicitly — every ORM does this, EF Core emits `PK_<Table>` — so
+                        that an adopted schema round-trips under its own name rather than
+                        silently acquiring PostgreSQL's default. The name is not merely
+                        cosmetic: `ON CONFLICT ON CONSTRAINT` and `ALTER TABLE DROP
+                        CONSTRAINT` both address it.
+
+                        Naming the constraint forces the table-level `CONSTRAINT <name>
+                        PRIMARY KEY (...)` spelling, since the inline column shorthand has
+                        nowhere to carry a name.
+                      maxLength: 63
+                      type: string
+                    privileges:
+                      description: |-
+                        Privileges declares per-table GRANT statements that should hold
+                        against this table. Every entry expands at reconcile time to:
+
+                          GRANT <Privileges> ON TABLE <Name> TO <ToRole>;
+
+                        Used to heal already-orphaned tables (created before
+                        DefaultPrivileges was declared on the parent SchemaDefinition)
+                        and to grant non-default privileges to specific roles.
+                        DefaultPrivileges in the parent SchemaDefinitionSpec covers the
+                        "every new table" case; this field is the per-table override.
+                      items:
+                        description: "DesiredTablePrivilege expresses one per-table
+                          GRANT statement.\n\nSemantics:\n\n\tGRANT <Privileges> ON
+                          TABLE <table> TO <ToRole>;\n\nUsed to heal already-orphaned
+                          tables that were created before\nDefaultPrivileges was declared
+                          on the parent SchemaDefinition, and\nto grant non-default
+                          privileges to specific roles. Idempotent in\nPostgreSQL."
+                        properties:
+                          privileges:
+                            description: |-
+                              Privileges is the privilege set granted. Same validation as
+                              DesiredDefaultPrivilege.Privileges.
+                            items:
+                              type: string
+                            maxItems: 16
+                            minItems: 1
+                            type: array
+                          toRole:
+                            description: ToRole is the PG role receiving the granted
+                              privileges.
+                            maxLength: 63
+                            pattern: ^[a-z_][a-z0-9_]*$
+                            type: string
+                          withGrantOption:
+                            description: WithGrantOption mirrors the SQL `WITH GRANT
+                              OPTION` clause.
+                            type: boolean
+                        required:
+                        - privileges
+                        - toRole
+                        type: object
+                      maxItems: 32
+                      type: array
+                    uniqueConstraints:
+                      description: |-
+                        UniqueConstraints declares table-level UNIQUE constraints. Prefer
+                        these over a unique entry in Indexes whenever a foreign key might
+                        reference the columns: PostgreSQL will not accept a bare unique
+                        index as an FK target.
+                      items:
+                        description: |-
+                          DesiredUniqueConstraint declares a table-level UNIQUE constraint.
+
+                          Distinct from a unique DesiredIndex on purpose. PostgreSQL implements
+                          a UNIQUE constraint with a unique index, so the two enforce the same
+                          rule — but only a constraint can be the target of a foreign key
+                          (`REFERENCES t (col)` requires a PRIMARY KEY or UNIQUE constraint, not
+                          a bare unique index). Modelling a constraint as an index therefore
+                          round-trips a schema into one where existing foreign keys can no
+                          longer be created.
+                        properties:
+                          columns:
+                            description: |-
+                              Columns is the ordered column list the constraint spans. Order is
+                              significant: it determines the backing index's column order, and
+                              therefore which prefix lookups the index can serve.
+                            items:
+                              type: string
+                            maxItems: 32
+                            minItems: 1
+                            type: array
+                          name:
+                            description: |-
+                              Name of the constraint. PostgreSQL names the backing index after
+                              it, so the name must not collide with an index name either.
+                            maxLength: 63
+                            type: string
+                          nullsNotDistinct:
+                            description: |-
+                              NullsNotDistinct selects `UNIQUE NULLS NOT DISTINCT`, where two
+                              NULLs collide instead of being treated as different values
+                              (PostgreSQL 15+).
+
+                              This is a semantic difference, not a tuning knob: under the
+                              default NULLS DISTINCT a nullable unique column accepts unlimited
+                              NULL rows. Dropping the flag on round-trip would silently widen
+                              what the table accepts.
+                            type: boolean
+                        required:
+                        - columns
+                        - name
+                        type: object
+                      maxItems: 32
+                      type: array
+                  required:
+                  - columns
+                  - name
+                  type: object
+                maxItems: 1024
+                minItems: 1
+                type: array
+              triggers:
+                description: |-
+                  Triggers are PostgreSQL trigger bindings. The referenced
+                  function must exist in spec.functions or already in the DB.
+                items:
+                  description: DesiredTrigger declares a PostgreSQL trigger binding.
+                  properties:
+                    events:
+                      description: Events is the list of events that fire the trigger.
+                      items:
+                        type: string
+                      maxItems: 4
+                      minItems: 1
+                      type: array
+                    forEachRow:
+                      default: true
+                      description: |-
+                        ForEachRow controls whether the trigger fires per row or per
+                        statement. Default true (FOR EACH ROW).
+                      type: boolean
+                    function:
+                      description: |-
+                        Function is the trigger function name (must exist in spec.functions
+                        or already in the database). The function must return TRIGGER.
+                      maxLength: 63
+                      type: string
+                    name:
+                      description: Name is the trigger name.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    table:
+                      description: Table is the table the trigger is attached to.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    timing:
+                      description: Timing is BEFORE or AFTER.
+                      enum:
+                      - BEFORE
+                      - AFTER
+                      - INSTEAD OF
+                      type: string
+                    when:
+                      description: |-
+                        When is an optional conditional expression. The trigger only
+                        fires when this evaluates to true.
+                      maxLength: 4096
+                      type: string
+                  required:
+                  - events
+                  - function
+                  - name
+                  - table
+                  - timing
+                  type: object
+                maxItems: 256
+                type: array
+              views:
+                description: Views are PostgreSQL views. Created after all referenced
+                  tables.
+                items:
+                  description: DesiredView declares a PostgreSQL view.
+                  properties:
+                    name:
+                      description: Name is the view name.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                    query:
+                      description: Query is the SELECT statement backing the view.
+                      maxLength: 65536
+                      type: string
+                    replace:
+                      description: |-
+                        Replace controls CREATE OR REPLACE semantics. When true, the
+                        differ always emits CREATE OR REPLACE VIEW regardless of whether
+                        the view exists. Default false: only CREATE when absent,
+                        otherwise warn if the query changed.
+                      type: boolean
+                  required:
+                  - name
+                  - query
+                  type: object
+                maxItems: 256
+                type: array
+            required:
+            - tables
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of schemaRef or schemaSelector must be set
+              rule: (has(self.schemaRef) && self.schemaRef != '') != (has(self.schemaSelector)
+                && self.schemaSelector != null)
+          status:
+            description: |-
+              SchemaDefinitionStatus reports the observed diff + auto-generated
+              MigrationBundle reference.
+            properties:
+              conditions:
+                description: |-
+                  Conditions:
+                    Ready           — schema matches desired state
+                    Inspected       — live inspection completed successfully
+                    DiffComputed    — differ produced an operation plan (True with
+                                      reason=NoDrift means the plan was empty)
+                    BundleGenerated — a MigrationBundle was emitted to Apply the
+                                      diff; tracks CurrentBundleRef, so False
+                                      whenever that field is empty
+
+                  The last three are pipeline stages, re-stated on every terminal
+                  path rather than latched, so all four always describe the same
+                  reconcile. See ConditionTypeInspected and friends.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              currentBundleRef:
+                description: |-
+                  CurrentBundleRef is the auto-generated MigrationBundle that's
+                  currently applying the diff. Empty when the schema matches
+                  desired state (Ready=True).
+                maxLength: 253
+                type: string
+              driftedSchemas:
+                description: |-
+                  DriftedSchemas lists DatabaseSchemas whose observed shapes
+                  diverge from the lockstep set when SchemaSelector + MixedVersion
+                  Policy=Refuse is in effect. Empty under MostBehindWins (the
+                  reconciler proceeds rather than recording divergence) and empty
+                  under SchemaRef (no fan-out, no divergence to surface).
+                items:
+                  description: |-
+                    DriftedSchema records one fanned-out DatabaseSchema that diverges
+                    from the lockstep set under MixedVersionPolicy=Refuse.
+                  properties:
+                    lastInspectedAt:
+                      description: |-
+                        LastInspectedAt is when the reconciler last inspected this
+                        schema's live shape.
+                      format: date-time
+                      type: string
+                    pendingOperations:
+                      description: |-
+                        PendingOperations is the diff size for this individual schema
+                        against the SchemaDefinition's desired state. The schema with
+                        the largest PendingOperations is the most-behind candidate.
+                      format: int32
+                      type: integer
+                    schemaRef:
+                      description: SchemaRef is the DatabaseSchema's metadata.name.
+                      maxLength: 253
+                      type: string
+                  required:
+                  - pendingOperations
+                  - schemaRef
+                  type: object
+                maxItems: 1024
+                type: array
+                x-kubernetes-list-type: atomic
+              fingerprint:
+                description: |-
+                  Fingerprint is a deterministic hash of the SD's desired-state
+                  spec (tables + columns + indexes + functions + ... — same
+                  inputs the differ consumes). Recomputed on every reconcile;
+                  changes whenever the operator edits the spec. The SD reconciler
+                  stamps this on every emitted MigrationBundle as the annotation
+                  `keystone.hexxlock.io/sd-fingerprint`; the bundle runner copies
+                  it onto DatabaseSchema.Status.LastAppliedFingerprint when a
+                  MigrationExecution succeeds for that schema.
+
+                  SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare
+                  this against per-schema LastAppliedFingerprint to verify
+                  convergence in an identity-based, race-free way.
+
+                  Empty when the spec has never been hashed (very first reconcile
+                  of a freshly-applied SD).
+                maxLength: 64
+                type: string
+              lastDiffTime:
+                description: LastDiffTime is when the differ last ran.
+                format: date-time
+                type: string
+              matchedSchemas:
+                description: |-
+                  MatchedSchemas is the count of DatabaseSchemas the reconciler
+                  resolved on the last pass. 1 for SchemaRef, N for SchemaSelector.
+                  Surfaces fan-out width on `kubectl get sd`.
+                format: int32
+                type: integer
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              pendingOperations:
+                description: |-
+                  PendingOperations counts the diff size from the last reconcile.
+                  0 means the schema is at desired state. When SchemaSelector
+                  fan-out is used this reflects the size of the emitted bundle's
+                  op set (i.e. the most-behind schema's diff under MostBehindWins
+                  policy, or the lockstep diff under Refuse with all schemas in
+                  agreement).
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

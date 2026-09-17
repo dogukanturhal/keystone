@@ -1,0 +1,107 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+{{- $obj := .Values.metrics.prometheusRule.reconcileSuccessObjective -}}
+{{- $budget := sub 1.0 $obj -}}
+{{- $latency := .Values.metrics.prometheusRule.migrationApplyP99Seconds -}}
+# Keystone SLO rules — ADR 0014 multi-window burn-rate.
+#
+# SLO 1: reconcile success — {{ $obj }} of controller-runtime reconciles
+#        complete without error over a rolling 28d window.
+# SLO 2: MigrationExecution apply latency — p99 <= {{ $latency }}s for
+#        versioned bundles.
+#
+# SLI uses the controller-runtime-emitted metric
+# `controller_runtime_reconcile_total` (labels: controller, result). The
+# Operator SDK / controller-runtime wires it automatically, so the alerts
+# hold even when custom metrics are absent.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "keystone-operator.fullname" . }}-slo
+  namespace: {{ default .Release.Namespace .Values.metrics.prometheusRule.namespace }}
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: keystone.slo.reconcile-success
+      interval: 30s
+      rules:
+        # Recording rules for SLI at multiple windows.
+        - record: keystone:reconcile_error_rate:1h
+          expr: |
+            sum by (controller) (
+              rate(controller_runtime_reconcile_total{controller=~"logicaldatabase|databaseschema|migrationbundle|migrationexecution|driftreport|productinstance|schemadefinition",result="error"}[1h])
+            )
+            /
+            clamp_min(
+              sum by (controller) (
+                rate(controller_runtime_reconcile_total{controller=~"logicaldatabase|databaseschema|migrationbundle|migrationexecution|driftreport|productinstance|schemadefinition"}[1h])
+              ),
+              0.001
+            )
+        - record: keystone:reconcile_error_rate:6h
+          expr: |
+            sum by (controller) (
+              rate(controller_runtime_reconcile_total{controller=~"logicaldatabase|databaseschema|migrationbundle|migrationexecution|driftreport|productinstance|schemadefinition",result="error"}[6h])
+            )
+            /
+            clamp_min(
+              sum by (controller) (
+                rate(controller_runtime_reconcile_total{controller=~"logicaldatabase|databaseschema|migrationbundle|migrationexecution|driftreport|productinstance|schemadefinition"}[6h])
+              ),
+              0.001
+            )
+        # Fast burn: 1h @ 14.4x → 2% of 28d budget in 1h → page on-call.
+        - alert: KeystoneReconcileBurnRateFast
+          expr: |
+            keystone:reconcile_error_rate:1h > (14.4 * {{ $budget }})
+          for: 2m
+          labels:
+            severity: critical
+            slo: keystone.reconcile-success
+          annotations:
+            summary: Keystone reconcile-success SLO burning fast (1h window)
+            description: |
+              Controller {{"{{"}} $labels.controller {{"}}"}} has burned error budget at >14.4x the target rate over the last hour. At this rate the 28d budget exhausts in <2 days. Runbook: docs/runbook.md#reconcile-error-spike
+        # Slow burn: 6h @ 6x → 5% in 6h → ticket.
+        - alert: KeystoneReconcileBurnRateSlow
+          expr: |
+            keystone:reconcile_error_rate:6h > (6 * {{ $budget }})
+          for: 15m
+          labels:
+            severity: warning
+            slo: keystone.reconcile-success
+          annotations:
+            summary: Keystone reconcile-success SLO burning slow (6h window)
+            description: |
+              Controller {{"{{"}} $labels.controller {{"}}"}} is burning error budget at 6x the target rate. Sustained regression — investigate before the next on-call rotation. Runbook: docs/runbook.md#reconcile-error-spike
+    - name: keystone.slo.migration-apply-latency
+      interval: 30s
+      rules:
+        # p99 apply duration from the rollout stage histogram — closest
+        # proxy in v0.1 for per-migration latency. When a dedicated
+        # `keystone_migration_apply_duration_seconds` histogram lands
+        # (Phase 12), swap the source metric name.
+        - record: keystone:migration_apply_p99:7d
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (le) (
+                rate(keystone_rollout_stage_duration_seconds_bucket[7d])
+              )
+            )
+        - alert: KeystoneMigrationApplyLatencyHigh
+          expr: |
+            keystone:migration_apply_p99:7d > {{ $latency }}
+          for: 10m
+          labels:
+            severity: warning
+            slo: keystone.migration-apply-latency
+          annotations:
+            summary: MigrationExecution p99 apply latency above SLO
+            description: |
+              p99 apply latency is above the {{ $latency }}s objective over the last 7d. Inspect the MigrationExecution backlog + DatabaseProvider health. Runbook: docs/runbook.md#migration-execution-slow
+{{- end }}

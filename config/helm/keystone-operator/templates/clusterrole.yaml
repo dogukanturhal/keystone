@@ -1,0 +1,86 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if .Values.rbac.create }}
+# ClusterRole sourced from config/rbac/role.yaml (controller-gen output).
+# Verbs stay identical to the kustomize bundle so Helm and kustomize
+# installations share one RBAC surface.
+#
+# Last sync: 2026-05-02 (FF3 retention controller added 'delete' verb on
+# auditentries; commits c22002e + aa5a64d previously added auditlogs +
+# auditentries + status).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "keystone-operator.fullname" . }}-manager-role
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [keystone.hexxlock.io]
+    resources: [auditentries]
+    # create  — audit.Logger.Append (MigrationBundle / MigrationExecution
+    #           / SchemaSnapshot reconcilers).
+    # delete  — AuditEntryRetentionController (Phase-12) prunes expired
+    #           entries after off-cluster archive succeeds. AuditEntries
+    #           remain append-only from writers; delete is exclusively
+    #           the retention path. No update/patch — chain immutability.
+    verbs: [create, delete, get, list, watch]
+  - apiGroups: [keystone.hexxlock.io]
+    resources:
+      - databaseproviders
+      - productdefinitions
+      - schemapolicies
+    verbs: [get, list, watch]
+  - apiGroups: [keystone.hexxlock.io]
+    resources: [auditlogs]
+    verbs: [create, get, list, patch, update, watch]
+  - apiGroups: [keystone.hexxlock.io]
+    resources:
+      - auditlogs/status
+      - databaseproviders/status
+      - databaseschemas/status
+      - driftreports/status
+      - logicaldatabases/status
+      - migrationbundles/status
+      - migrationexecutions/status
+      - migrationplans/status
+      - productdefinitions/status
+      - productinstances/status
+      - schemadefinitions/status
+      - schemasnapshots/status
+    verbs: [get, patch, update]
+  - apiGroups: [keystone.hexxlock.io]
+    resources:
+      - databaseschemas
+      - driftreports
+      - logicaldatabases
+      - migrationbundles
+      - migrationexecutions
+      - migrationplans
+      - productinstances
+      - schemadefinitions
+      - schemasnapshots
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [keystone.hexxlock.io]
+    resources:
+      - databaseschemas/finalizers
+      - logicaldatabases/finalizers
+      - migrationbundles/finalizers
+      - migrationexecutions/finalizers
+      - productinstances/finalizers
+      - schemadefinitions/finalizers
+    verbs: [update]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    verbs: [get, list, watch]
+{{- end }}

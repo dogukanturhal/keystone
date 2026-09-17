@@ -1,0 +1,221 @@
+# Trivy CVE allow-list for upstream-pending issues that don't apply to
+# our threat model. Each entry MUST include:
+#   - the CVE ID
+#   - which artifact it appears in (manager / tools)
+#   - upstream tracking link
+#   - threat-model justification (why it doesn't matter for THIS deployment)
+#   - planned removal trigger
+#
+# These ignores are honored by trivy fs / image scans cluster-wide. Keep
+# the list short — every entry is a declared accepted risk; review on
+# every release.
+#
+# ==========================================================================
+# cosign v2.6.3 stdlib (Go 1.25.7) — keystone-tools image only
+# ==========================================================================
+#
+# cosign v2.6.3 (latest v2.x maintenance release, 2026-04-06 — same day
+# as v3.0.6) is built with Go 1.25.7. The four CVEs below were patched
+# in Go 1.25.8 (CVE-2026-25679) and Go 1.25.9 (CVE-2026-32280 / 32281
+# / 32283). sigstore has not yet published a rebuild on 1.25.9+ on
+# either the v2.x or v3.x line; the keystone-manager image is on Go
+# 1.26.2 and is unaffected.
+#
+# WHY v2.6.3 NOT v3.0.6
+# ---------------------
+# cosign v3 deprecated `--tlog-upload=false` in favor of `--signing-config`
+# files, which would require refactoring every signing call site here.
+# v2.6.3 is the LTS-line maintenance release shipped alongside v3.0.6 with
+# the same dependency-CVE backports but unchanged v2 flag syntax. When
+# sigstore eventually drops v2.x support we'll refactor to v3 + signing-
+# config in one go.
+#
+# THREAT MODEL FOR THIS DEPLOYMENT
+# --------------------------------
+# cosign in keystone-tools is invoked exclusively by the soak CronJob
+# (<gitops-repo>/keystone/resources/soak/cronjob.yaml).
+# The Pod:
+#   - exposes no network listeners (it's a one-shot job)
+#   - parses image references from `kubectl get` jsonpath output
+#     (operator-controlled, in-cluster admin SA — not attacker-supplied)
+#   - performs only `cosign verify` against Harbor (in-cluster TLS via
+#     Linkerd mTLS to harbor.monitoring.svc, not a public endpoint)
+#   - holds no secrets beyond the soak ServiceAccount token
+#
+# All four CVEs require attacker-controlled untrusted input on a TLS
+# server side or attacker-controlled URL in net/url.Parse. None of those
+# code paths exist in our cosign-as-soak-CLI usage. Risk acceptance is
+# bounded by:
+#   - 7-day weekly soak cadence (CronJob window)
+#   - revocable RBAC (kubectl delete clusterrolebinding keystone-soak)
+#   - Loki log audit trail (every soak run is observable)
+#
+# REMOVAL TRIGGER
+# ---------------
+# Remove all four lines when sigstore publishes a cosign release built
+# with Go 1.25.9+ (likely v3.0.7 or v3.1.0). Track:
+#   https://github.com/sigstore/cosign/releases
+#
+# Verify post-removal with:
+#   trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+#     ghcr.io/dogukanturhal/keystone-tools:v0.1.x
+CVE-2026-25679
+CVE-2026-32280
+CVE-2026-32281
+CVE-2026-32283
+
+# ==========================================================================
+# cosign v2.6.3 transitive deps — keystone-tools image only
+# ==========================================================================
+#
+# 5 dep CVEs that cosign v2.6.3 + v3.0.6 (both released 2026-04-06) have
+# not yet bumped. Tracked upstream:
+#   https://github.com/sigstore/cosign/pulls?q=is%3Apr+label%3Aupgrade
+#
+# Per-CVE attack surface analysis for OUR usage of cosign — exclusively
+# as a one-shot CronJob CLI in keystone-tools (soak Pod). The Pod:
+#   - has no network listener
+#   - talks to Harbor via HTTP(S) — HTTPS to upstream Harbor, NOT gRPC
+#   - sets --tlog-upload=false (no Rekor / public sigstore calls)
+#   - reads image refs from `kubectl get` jsonpath (operator-controlled)
+#
+# CVE-2025-15558  docker/cli v29.0.3 -> 29.2.0
+#                 Privilege escalation in Docker CLI for WINDOWS only.
+#                 Our containers are Linux. Zero impact.
+#
+# CVE-2026-34986  go-jose/v4 v4.1.3 -> 4.1.4
+#                 JWS signature verification edge case affecting
+#                 servers that accept attacker-supplied JWS. cosign in
+#                 our usage VERIFIES signatures it produced itself,
+#                 with publicKeys we control. No untrusted JWS path.
+#
+# CVE-2026-24051  otel/sdk v1.38.0 -> 1.40.0
+#                 Arbitrary log file read via OTEL collector config
+#                 manipulation. No OTEL collector deployed in our soak
+#                 path. cosign's otel SDK is unused at runtime.
+#
+# CVE-2026-39883  otel/sdk v1.38.0 -> 1.43.0
+#                 BSD `kenv(2)` command not using safe path. Linux-only
+#                 deployment. Zero impact.
+#
+# CVE-2026-33186  grpc v1.77.0 -> 1.79.3 (CRITICAL)
+#                 gRPC HTTP/2 server resource exhaustion. cosign uses
+#                 gRPC as a CLIENT to TUF/Rekor. With --tlog-upload=
+#                 false no Rekor traffic flows. OCI/Harbor traffic is
+#                 plain HTTPS, not gRPC. No gRPC server exposed.
+#
+# REMOVAL TRIGGER
+# ---------------
+# Each of these is fixed upstream. cosign needs to bump the dep and
+# re-release. Track sigstore/cosign Dependabot PRs. Remove the
+# matching ignore line as each new cosign release ships the fix.
+CVE-2025-15558
+CVE-2026-34986
+CVE-2026-24051
+CVE-2026-39883
+CVE-2026-33186
+
+# ==========================================================================
+# 2026-05-12 Go stdlib batch — cosign + kubectl in keystone-tools
+# ==========================================================================
+#
+# Five HIGH stdlib CVEs published 2026-05-12 affect every upstream Go
+# binary built before that date:
+#   cosign v3.0.6 (Go 1.25.7) — sigstore/cosign latest, no rebuild
+#   kubectl v1.34.x/1.35.x/1.36.x (Go 1.25.9 / 1.26.2) — k8s.io latest,
+#                                                       no rebuild
+# Fixed in Go 1.25.10 or 1.26.3. The keystone-manager image is already
+# rebuilt on Go 1.26.3 (Dockerfile bump) and is clean; these ignores
+# are scoped functionally to the keystone-tools image.
+#
+# THREAT MODEL FOR THIS DEPLOYMENT
+# --------------------------------
+# Same as the cosign v2.6.3 stdlib section above:
+#   - cosign and kubectl in keystone-tools are invoked exclusively by the
+#     soak CronJob, a one-shot in-cluster admin Pod with no network
+#     listener and operator-controlled inputs only.
+#   - kubectl talks to the in-cluster API server via Linkerd mTLS, with
+#     RBAC scoped to the soak SA's read permissions.
+#   - cosign uses --tlog-upload=false (no Rekor / public sigstore).
+#   - The Pod has no attacker surface and parses no untrusted data.
+# All five CVEs require attacker-controlled inputs (TLS server, HTTP
+# parser, x509 chain) on a code path our usage does not enter.
+#
+# REMOVAL TRIGGER
+# ---------------
+# Remove all five lines when both upstream rebuilds land:
+#   - cosign on Go 1.25.10+ (likely v3.0.7 or v3.1.0)
+#   - kubectl on Go 1.25.10 / 1.26.3 (next k8s patch wave)
+# Track:
+#   https://github.com/sigstore/cosign/releases
+#   https://github.com/kubernetes/kubernetes/releases
+#
+# These also gate sign-image via vuln-scan-tools-image (the CI configuration
+# sign-image.needs). Without them, every master pipeline produces an
+# unsigned image that Kyverno verify-keystone-image-signatures denies.
+CVE-2026-33811
+CVE-2026-33814
+CVE-2026-39820
+CVE-2026-39836
+CVE-2026-42499
+
+# ==========================================================================
+# 2026-06-04 Go stdlib batch (CONTINUATION) — cosign + kubectl in keystone-tools
+# ==========================================================================
+#
+# Three additional HIGH stdlib CVEs that landed AFTER the 2026-05-12
+# batch above. Same artifacts, same Go fixed-in target (1.25.10 / 1.26.3),
+# same threat-model justification — see the section above for the full
+# argument; the new CVE IDs are appended here so the next pipeline run
+# stops gating on stdlib-only findings while we wait for upstream rebuilds.
+#
+# Confirmed live in pipeline #9131 (2026-06-04 20:38 UTC) vuln-scan-tools-image:
+#   File: usr/local/bin/cosign  stdlib v1.25.7  → 1.25.10, 1.26.3
+#   File: usr/local/bin/kubectl stdlib v1.25.9  → 1.25.10, 1.26.3
+#
+# kubectl v1.35.4 → v1.35.5 (this MR also bumps Dockerfile.tools KUBECTL_VERSION)
+# is expected to clear the kubectl side of these once verified by trivy
+# against the rebuilt image. cosign v3.0.6 is still the latest sigstore
+# release and remains on Go 1.25.7 — these ignore lines must remain
+# until cosign ships a Go 1.25.10+ rebuild.
+#
+# REMOVAL TRIGGER
+# ---------------
+# Same as the 2026-05-12 section above. Once kubectl + cosign are both
+# rebuilt on Go 1.25.10+, trivy will stop flagging these three IDs and
+# this entire block can be deleted.
+CVE-2026-39823
+CVE-2026-39825
+CVE-2026-39826
+
+# ==========================================================================
+# CVE-2026-42504 — Go stdlib (kubectl v1.35.5 / cosign earlier 3.x)
+# ==========================================================================
+#
+# Tracking: https://groups.google.com/g/golang-dev (Go security mailing
+# list — patched in Go 1.25.11 / 1.26.4). Surfaced 2026-06-09 in
+# pipeline #9795 vuln-scan-tools-image (this MR's bump-cosign-3.1.1 also
+# clears the cosign half if the rebuild uses Go 1.25.11+; kubectl half
+# remains until v1.35.6 ships from upstream — no date announced).
+#
+# THREAT MODEL
+# ------------
+# CVE-2026-42504 is in encoding/asn1 — denial-of-service on attacker-
+# controlled ASN.1 input. The keystone-tools image is consumed ONLY by
+# the in-cluster `keystone-soak` CronJob, which:
+#   - Runs `kubectl get/apply` against trusted in-cluster API (no
+#     external ASN.1 parsing surface)
+#   - Runs `cosign verify` against trusted Harbor-signed images
+#     (signature DER is from a controlled set of issuers — not
+#     attacker-controlled input)
+# A DoS on these CronJob invocations would surface as a single missed
+# soak window, which the next 15-min cron run recovers from. Not a
+# security risk for this deployment.
+#
+# REMOVAL TRIGGER
+# ---------------
+# When kubectl v1.35.6 ships (Go 1.25.11+) AND cosign v3.x next minor
+# rebuilds on Go 1.25.11+ AND trivy stops flagging this CVE against the
+# rebuilt image, remove this block entirely. ETA: weeks (Kubernetes
+# 1.35.6 cherry-pick deadline is the gating event).
+CVE-2026-42504

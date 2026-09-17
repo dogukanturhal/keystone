@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample CRs only — never deploy from this kustomization to production.
+# Use it for local kind/k3d smoke tests:
+#
+#   kubectl apply -k config/samples
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - keystone_v1alpha1_clusterregistration.yaml
+  - keystone_v1alpha1_databaseprovider.yaml
+  - keystone_v1alpha1_logicaldatabase.yaml
+  - keystone_v1alpha1_databaseschema.yaml
+  - keystone_v1alpha1_migrationbundle.yaml
+  - keystone_v1alpha1_migrationbundle_pgroll.yaml
+  - keystone_v1alpha1_productdefinition.yaml
+  - keystone_v1alpha1_productinstance.yaml
+  - keystone_v1alpha1_rolloutpolicy.yaml

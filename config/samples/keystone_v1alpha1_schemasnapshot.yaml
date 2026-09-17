@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SchemaSnapshot — immutable schema registry entry.
+#
+# Two shapes coexist:
+#
+#   1. Manual: operators `kubectl apply` a SchemaSnapshot before a
+#      risky change for evidence-of-state ("what did the schema look
+#      like pre-migration?").
+#
+#   2. Automatic: the MigrationExecution controller creates one on
+#      every successful apply with the deterministic name
+#      `auto-<bundle>-<version>-<schema>`. Status.AutoSource names
+#      the source bundle@version for filtering.
+#
+# Status carries three artifacts:
+#
+#   - appliedMigrations: version + contentHash from schema_migrations
+#   - fingerprint: SHA-256 of the structural shape (drift detection)
+#   - structure: typed tables/columns/indexes/constraints — diffable
+#     via `keystonectl snapshot diff`
+#   - erd: Mermaid diagram for UI rendering
+#
+# See docs/adrs/0021-schema-registry-auto-snapshots.md for design.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: SchemaSnapshot
+metadata:
+  name: pre-v2-users-acme
+  namespace: keystone-system
+  labels:
+    module: users
+    keystone.hexxlock.io/tenant-id: acme
+spec:
+  schemaRef: users-acme
+  reason: "pre-v2 baseline for acme tenant — taken before scheduled email-format migration"
+  retentionDays: 730   # 2 years — regulatory hold for PII-touching changes

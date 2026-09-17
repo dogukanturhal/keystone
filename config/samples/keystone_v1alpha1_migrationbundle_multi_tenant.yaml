@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Multi-tenant MigrationBundle with throttling + per-tenant
+# visibility. Demonstrates the B2 features:
+#
+#   - spec.maxConcurrentExecutions caps non-staged fanout at 5 in-flight
+#     Executions at a time; saves connection budget on small CNPG clusters
+#   - DatabaseSchemas carry keystone.hexxlock.io/tenant-id labels so
+#     status.schemaProgress surfaces the tenant dimension for triage
+#
+# Triage the rollout with:
+#
+#   kubectl get mb users-multi-tenant \
+#     -o jsonpath='{.status.schemaProgress}' | jq '.[] |
+#       select(.phase=="Failed") | {tenantID, message}'
+#
+# See docs/adrs/0019 for the full design rationale.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: MigrationBundle
+metadata:
+  name: users-multi-tenant
+  namespace: keystone-system
+  labels:
+    module: users
+    tier: prod
+spec:
+  version: v1.0.0
+  strategy: versioned
+  maxConcurrentExecutions: 5
+  source:
+    type: ConfigMap
+    configMapRef:
+      name: users-migrations-v1
+  # Matches every DatabaseSchema labelled module=users; tenant-id
+  # label on each schema surfaces in SchemaProgress.
+  schemaSelector:
+    matchLabels:
+      module: users
+---
+# Example DatabaseSchema with the tenant-id label set. In production
+# these are typically created by the ProductInstance controller; the
+# label propagates from the parent ProductInstance's tenantSlug.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: DatabaseSchema
+metadata:
+  name: users-acme
+  namespace: keystone-system
+  labels:
+    module: users
+    # B2 convention — enables per-tenant visibility in
+    # MigrationBundle.status.schemaProgress.
+    keystone.hexxlock.io/tenant-id: acme
+spec:
+  logicalDatabaseRef: users-db
+  name: users_acme
+  ownerRole: users_owner

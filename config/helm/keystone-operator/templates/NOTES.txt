@@ -1,0 +1,74 @@
+Keystone operator installed.
+
+  Release: {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+  Image: {{ include "keystone-operator.image" . }}
+  Replicas: {{ .Values.replicaCount }} (leader-elect={{ .Values.controller.leaderElect }})
+
+Verify the install:
+
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "keystone-operator.fullname" . }}
+  kubectl get crds | grep keystone.hexxlock.io
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{- if .Values.webhook.enabled }}
+
+Confirm the admission webhook is serving:
+
+  kubectl get validatingwebhookconfiguration {{ include "keystone-operator.fullname" . }}-validating-webhook
+{{- if .Values.webhook.certManager.enabled }}
+  kubectl -n {{ .Release.Namespace }} get certificate {{ include "keystone-operator.webhookCertName" . }}
+{{- end }}
+{{- end }}
+
+Create your first DatabaseProvider:
+
+  cat <<'EOF' | kubectl -n {{ .Release.Namespace }} apply -f -
+  apiVersion: keystone.hexxlock.io/v1alpha1
+  kind: DatabaseProvider
+  metadata:
+    name: my-postgres
+  spec:
+    host: pg.example.com
+    port: 5432
+    sslMode: require
+    maintenanceDatabase: postgres
+    adminSecretRef:
+      name: my-postgres-admin
+      usernameKey: username
+      passwordKey: password
+  EOF
+
+Then a LogicalDatabase:
+
+  cat <<'EOF' | kubectl apply -f -
+  apiVersion: keystone.hexxlock.io/v1alpha1
+  kind: LogicalDatabase
+  metadata:
+    name: app-db
+    namespace: default
+  spec:
+    name: app_db
+    providerRef: my-postgres
+    ownerRole: app_owner
+  EOF
+
+Operational references:
+
+  - Runbook:    docs/runbook.md
+  - Hardening:  docs/operator-hardening.md
+  - ADRs:       docs/adrs/
+  - Observability: docs/observability.md
+
+{{- if not .Values.networkPolicy.extraEgressCIDRs }}
+{{- if not .Values.networkPolicy.extraEgressNamespaceSelectors }}
+
+WARNING: networkPolicy.enabled is true but no egress CIDRs or namespace
+selectors are configured. The manager cannot reach any DatabaseProvider
+until you add either networkPolicy.extraEgressCIDRs or
+networkPolicy.extraEgressNamespaceSelectors. See docs/operator-hardening.md §1.
+{{- end }}
+{{- end }}
+
+License: AGPL-3.0-or-later. See LICENSE and NOTICE in the repository.

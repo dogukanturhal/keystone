@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SchemaPolicy with CEL expression rules.
+#
+# Demonstrates the C2 extension surface: policies that the CRD
+# doesn't model as first-class fields are expressible as CEL rules.
+# See docs/adrs/0023-cel-policy-engine.md for activation variables.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: SchemaPolicy
+metadata:
+  name: prod-governance
+spec:
+  targetSelector:
+    matchLabels:
+      tier: prod
+
+  # Typed fields cover the common cases.
+  minLintLevel: error
+  planApproval: Manual
+
+  # CEL expressions extend the surface for everything else.
+  expressions:
+    # 1. Require a Jira ticket annotation on every prod bundle.
+    - name: require-jira-ticket
+      severity: Error
+      message: "prod bundles must declare keystone.hexxlock.io/jira annotation"
+      expression: |
+        !("keystone.hexxlock.io/jira" in annotations)
+
+    # 2. Forbid any bundle that drops a column AND has no
+    #    warning-level approval signal in findings.
+    - name: drop-column-needs-review
+      severity: Error
+      message: "bundles that drop a column must pass a warning-level reviewer pass"
+      expression: |
+        bundle.spec.operations.exists(op, op.kind == "drop_column") &&
+        !findings.exists(f, f.severity == "warning")
+
+    # 3. Warn when a pgroll bundle has >5 ops on the same table —
+    #    suggests it should be split into two bundles for easier
+    #    review + faster rollback.
+    - name: too-many-ops-same-table
+      severity: Warning
+      message: "more than 5 ops on a single table — consider splitting the bundle"
+      expression: |
+        strategy == "pgroll-expand-contract" &&
+        bundle.spec.operations.filter(op, op.table == "users").size() > 5
+
+    # 4. Enforce version naming convention: prod bundles must use
+    #    date-stamped versions (YYYYMMDDHHmm_…).
+    - name: prod-version-format
+      severity: Error
+      message: "prod bundles must use YYYYMMDDHHmm_… version format"
+      expression: |
+        !version.matches("^[0-9]{12}_[a-z0-9_]+$")

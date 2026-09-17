@@ -1,0 +1,74 @@
+# OpenSSF Scorecard workflow — GitHub mirror activation file
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# LOCATION NOTE: This file lives at services/keystone/.github/workflows/scorecard.yml
+# inside the platform monorepo (GitLab canonical). When the GitHub mirror
+# github.com/hexxlock/keystone is created, this file must be copied to
+# .github/workflows/scorecard.yml at the root of that mirror repository.
+# It is stored here so it is version-controlled alongside the code it
+# evaluates and can be reviewed before activation.
+#
+# ACTIVATION CHECKLIST:
+#   1. Mirror github.com/hexxlock/keystone is live and syncing from GitLab.
+#   2. GitHub Actions is enabled on the mirror repository.
+#   3. The repository has "Read and write permissions" for GITHUB_TOKEN
+#      under Settings > Actions > General > Workflow permissions.
+#   4. Scorecard upload requires the "Security events" write permission
+#      and Code Scanning must be enabled (Settings > Security > Code scanning).
+#   5. Replace the pinned SHA below if ossf/scorecard-action has a newer
+#      stable release: https://github.com/ossf/scorecard-action/releases
+#
+# Pinned to commit SHA rather than tag to satisfy Scorecard's own
+# Pinned-Dependencies check. Current SHA = ossf/scorecard-action@v2.4.0
+# (verify at https://github.com/ossf/scorecard-action/releases/tag/v2.4.0).
+# Pin SHA: replace __REPLACE_ME__ with the full commit SHA of v2.4.0.
+
+name: OpenSSF Scorecard
+
+on:
+  # Run weekly to catch regressions from dependency or config drift.
+  schedule:
+    - cron: "30 4 * * 1"  # Monday 04:30 UTC
+  # Run on push to default branch to get immediate feedback.
+  push:
+    branches:
+      - main
+      - master
+
+permissions: read-all
+
+jobs:
+  scorecard:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload SARIF results to Code Scanning.
+      security-events: write
+      # Required to publish results to the OpenSSF Scorecard dashboard.
+      id-token: write
+      # Required to check out the repository.
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        # Pin by commit SHA — do NOT use a floating tag.
+        # SHA for ossf/scorecard-action@v2.4.0:
+        uses: ossf/scorecard-action@62b2cac7ed8198b15735ed49ab1e5cf35480ba46  # v2.4.0
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          # Publish results to OpenSSF dashboard (requires id-token: write).
+          publish_results: true
+
+      - name: Upload Scorecard results to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard-results.sarif
+          category: openssf-scorecard

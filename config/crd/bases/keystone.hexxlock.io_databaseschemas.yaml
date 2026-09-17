@@ -1,0 +1,272 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: databaseschemas.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: DatabaseSchema
+    listKind: DatabaseSchemaList
+    plural: databaseschemas
+    shortNames:
+    - dbs
+    - dschema
+    singular: databaseschema
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.name
+      name: Schema
+      type: string
+    - jsonPath: .spec.logicalDatabaseRef
+      name: Database
+      type: string
+    - jsonPath: .spec.ownerRole
+      name: Owner
+      type: string
+    - jsonPath: .status.migrationVersion
+      name: Version
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          DatabaseSchema declares a PostgreSQL schema that should exist inside a
+          referenced LogicalDatabase. The combination of LogicalDatabase +
+          DatabaseSchema replaces the hardcoded {SharedDB, Schema} pairs in the
+          legacy db-migrator.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              DatabaseSchemaSpec describes one PostgreSQL schema (`CREATE SCHEMA`).
+              Schemas live inside a LogicalDatabase, declared by reference. The
+              controller creates the schema, sets ownership, and manages default
+              privileges.
+            properties:
+              defaultPrivileges:
+                description: |-
+                  DefaultPrivileges declares ALTER DEFAULT PRIVILEGES rules applied at
+                  schema creation. See the CNPG-managed-roles landmine documented in
+                  project memory: pre-existing schemas need GRANT / REASSIGN OWNED
+                  before role hand-off, which the controller handles automatically
+                  when ownership changes.
+                items:
+                  description: |-
+                    SchemaPrivilegeDefault declares the default privileges granted to roles
+                    for objects subsequently created in the schema. Mirrors PostgreSQL
+                    `ALTER DEFAULT PRIVILEGES`. Mutating after creation requires the
+                    controller to re-apply ALTER DEFAULT PRIVILEGES; existing objects are
+                    not retroactively re-granted.
+                  properties:
+                    objectType:
+                      description: ObjectType is the PostgreSQL object class the defaults
+                        apply to.
+                      enum:
+                      - tables
+                      - sequences
+                      - functions
+                      - types
+                      - schemas
+                      type: string
+                    privileges:
+                      description: |-
+                        Privileges is the list of privileges to grant. Empty means "revoke
+                        all defaults" — distinct from omitting the entry, which leaves
+                        existing defaults untouched.
+                      items:
+                        type: string
+                      maxItems: 16
+                      type: array
+                    role:
+                      description: Role is the role being granted to (or revoked from).
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                  required:
+                  - objectType
+                  - privileges
+                  - role
+                  type: object
+                maxItems: 32
+                type: array
+              deletionPolicy:
+                default: Retain
+                description: |-
+                  DeletionPolicy controls what happens to the underlying PostgreSQL
+                  schema when this resource is deleted. Defaults to Retain.
+                enum:
+                - Retain
+                - Delete
+                type: string
+              logicalDatabaseRef:
+                description: |-
+                  LogicalDatabaseRef is the name of the LogicalDatabase this schema
+                  lives in. Must be in the same namespace as this DatabaseSchema —
+                  cross-namespace references would create an authorisation hole.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              name:
+                description: |-
+                  Name is the actual PostgreSQL schema name. Distinct from
+                  metadata.name for the same reason as LogicalDatabase.spec.name.
+                maxLength: 63
+                pattern: ^[a-z_][a-z0-9_]*$
+                type: string
+              ownerRole:
+                description: |-
+                  OwnerRole is the PostgreSQL role that owns the schema. The
+                  controller creates the role if absent and runs `ALTER SCHEMA OWNER
+                  TO`. Required for the same reasons as LogicalDatabase.spec.ownerRole.
+                maxLength: 63
+                pattern: ^[a-z_][a-z0-9_]*$
+                type: string
+              searchPathHints:
+                description: |-
+                  SearchPathHints is an optional list of schemas to prepend to the
+                  owner role's search_path. Empty means leave the role's search_path
+                  unmodified. Useful for cross-schema modules (e.g. a `crm` schema
+                  that reads from `master_data`).
+                items:
+                  type: string
+                maxItems: 16
+                type: array
+            required:
+            - logicalDatabaseRef
+            - name
+            - ownerRole
+            type: object
+          status:
+            description: DatabaseSchemaStatus reports observed state.
+            properties:
+              conditions:
+                description: |-
+                  Conditions reports the current state. Standard set: Ready, Available,
+                  Progressing, Degraded. Migration-specific conditions (Applied,
+                  DriftFree) are added by the MigrationController in Phase 3.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastAppliedFingerprint:
+                description: |-
+                  LastAppliedFingerprint is the SchemaDefinition.Status.Fingerprint
+                  value of the most recent SD-emitted MigrationBundle that the
+                  runner applied to this schema successfully. The bundle controller
+                  stamps it after a MigrationExecution reaches Phase=Succeeded for
+                  (this schema, the bundle carrying the SD fingerprint annotation).
+
+                  SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare
+                  this field against SchemaDefinition.Status.Fingerprint to verify
+                  per-schema convergence — race-free vs the matchedSchemas-count
+                  baseline that WaitSchemaUpToDate (v0.1.47) uses.
+
+                  Empty until the SD-emit-then-apply cycle has run at least once
+                  for this schema. Hand-authored MigrationBundles (no SD owner)
+                  don't carry the SD fingerprint annotation and won't update this
+                  field; that's intentional — fingerprint convergence is an
+                  SD-owned concept.
+                maxLength: 64
+                type: string
+              lastReconcileTime:
+                description: |-
+                  LastReconcileTime is when the controller last successfully reconciled
+                  this resource.
+                format: date-time
+                type: string
+              migrationVersion:
+                description: |-
+                  MigrationVersion is the highest schema_migrations version applied to
+                  this schema. Surfaced by the MigrationController; null until the
+                  first migration runs.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# crd-ref-docs configuration. Runs over ./api/v1alpha1 and emits
+# docs/api-reference.md. The markdown renderer is deterministic — every
+# schema-change MR produces a stable diff reviewers can inspect without
+# re-running the tool.
+#
+# Upstream: https://github.com/elastic/crd-ref-docs
+processor:
+  # Any Go type we don't want surfaced in the reference — internal
+  # marshal helpers, generator noise, kubebuilder-internal fields.
+  ignoreTypes:
+    - "zz_generated\\..*"
+  ignoreFields:
+    - "XXX_.*"
+    - "status.conditions\\[\\].lastTransitionTime"  # noisy, not useful in API ref
+  useRawDocstring: false
+
+# Link Go types to pkg.go.dev so reviewers can jump to upstream types
+# (metav1.ObjectMeta, corev1.ObjectReference, etc.) from the generated
+# reference.
+render:
+  # Kubernetes types rendered as external links.
+  kubernetesVersion: "1.31"
+  # The markdown renderer accepts only a single output file; don't split.

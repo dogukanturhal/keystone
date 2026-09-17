@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# MigrationBundle demonstrating the B1 set_not_null operation.
+#
+# This bundle transitions users.email from nullable to NOT NULL
+# without taking an AccessExclusive lock. The engine runs:
+#
+#   Expand:   ADD CONSTRAINT chk_email_notnull CHECK (email IS NOT NULL) NOT VALID
+#   Contract: VALIDATE CONSTRAINT, SET NOT NULL, DROP CONSTRAINT
+#
+# To run:
+#   1. kubectl apply -f this.yaml
+#   2. MigrationExecution enters Expanding → Expanded
+#   3. Confirm no new NULL writes via
+#      kubectl annotate migrationexecution <name> \
+#        keystone.hexxlock.io/complete=true
+#   4. Reconcile enters Contracting → Succeeded
+#
+# To abort mid-Expand:
+#   kubectl annotate migrationexecution <name> \
+#     keystone.hexxlock.io/abort=true
+#
+# See docs/adrs/0018 for the full abort semantics.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: MigrationBundle
+metadata:
+  name: users-email-not-null
+  namespace: keystone-system
+  labels:
+    module: users
+    tier: prod
+spec:
+  version: v2.0.0
+  strategy: pgroll-expand-contract
+  schemaSelector:
+    matchLabels:
+      module: users
+  operations:
+    - kind: set_not_null
+      table: users
+      setNotNull:
+        column: email

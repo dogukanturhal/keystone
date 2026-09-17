@@ -1,0 +1,326 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: productdefinitions.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: ProductDefinition
+    listKind: ProductDefinitionList
+    plural: productdefinitions
+    shortNames:
+    - pd
+    - product
+    singular: productdefinition
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.slug
+      name: Slug
+      type: string
+    - jsonPath: .spec.displayName
+      name: DisplayName
+      type: string
+    - jsonPath: .spec.defaultIsolation
+      name: Isolation
+      type: string
+    - jsonPath: .spec.databases[*]
+      name: Databases
+      type: integer
+    - jsonPath: .status.instanceCount
+      name: Instances
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ProductDefinition is the platform-author's blueprint for a sellable
+          product. Cluster-scoped because products are platform-wide.
+          Replaces the iam_products row in the legacy db-provisioner.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ProductDefinitionSpec is the platform-author's blueprint for a
+              product. Cluster-scoped because products are platform infrastructure.
+            properties:
+              apiRoutes:
+                description: |-
+                  APIRoutes declares the APISIX routes the product exposes. Phase
+                  4.1 turns these into actual APISIX upstreams + routes; Phase 4
+                  records them in status only.
+                items:
+                  description: ProductAPIRoute describes one external route the product
+                    exposes.
+                  properties:
+                    path:
+                      description: Path is the public URL path (e.g. "/api/v1/crm").
+                      maxLength: 512
+                      type: string
+                    upstreamPort:
+                      default: 80
+                      description: UpstreamPort is the Service port number.
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                    upstreamService:
+                      description: UpstreamService is the in-cluster Service the route
+                        forwards to.
+                      maxLength: 253
+                      type: string
+                  required:
+                  - path
+                  - upstreamService
+                  type: object
+                maxItems: 64
+                type: array
+              databases:
+                description: Databases declares everything storage-related the product
+                  needs.
+                items:
+                  description: |-
+                    ProductDatabase describes one logical database the product needs.
+                    A product may declare multiple databases (e.g. a core database
+                    plus a separate financials database).
+                  properties:
+                    extensions:
+                      description: |-
+                        Extensions to install in the database. Same allow-list semantics
+                        as LogicalDatabase.spec.extensions.
+                      items:
+                        type: string
+                      maxItems: 32
+                      type: array
+                    isolation:
+                      description: |-
+                        Isolation overrides the product-level default for this database.
+                        Use to silo PCI-relevant data (billing) while keeping the rest in
+                        bridge mode.
+                      enum:
+                      - pool
+                      - bridge
+                      - silo
+                      type: string
+                    key:
+                      description: |-
+                        Key is a stable identifier the product code uses to refer to
+                        this database (e.g. "core", "billing"). Required so the controller
+                        can name child LogicalDatabase resources predictably.
+                      maxLength: 32
+                      pattern: ^[a-z][a-z0-9_-]*$
+                      type: string
+                    nameTemplate:
+                      description: |-
+                        Name is the actual PostgreSQL database name template. Tokens
+                        {{tenantID}} and {{productSlug}} are substituted by the
+                        TenancyController at instantiation. Example: "example_suite_{{tenantID}}".
+                      maxLength: 63
+                      type: string
+                    providerRef:
+                      description: |-
+                        ProviderRef pins the DatabaseProvider this database lands on. A
+                        product instance with multiple databases may spread across
+                        providers; it's a deliberate decision the product author makes.
+                      maxLength: 253
+                      type: string
+                    schemas:
+                      description: |-
+                        Schemas declares the schemas that should exist within this
+                        database. Each becomes a DatabaseSchema CR.
+                      items:
+                        description: ProductSchema describes one schema within a ProductDatabase.
+                        properties:
+                          key:
+                            description: Key is a stable identifier (e.g. "crm", "billing").
+                            maxLength: 32
+                            type: string
+                          migrationBundleRef:
+                            description: |-
+                              MigrationBundleRef is the MigrationBundle name that ships the
+                              initial DDL for this schema. Optional — schemas without an
+                              initial migration just become empty CREATE SCHEMA targets.
+                            maxLength: 253
+                            type: string
+                          nameTemplate:
+                            description: |-
+                              NameTemplate is the schema name template (same tokens as
+                              ProductDatabase.NameTemplate).
+                            maxLength: 63
+                            type: string
+                        required:
+                        - key
+                        - nameTemplate
+                        type: object
+                      maxItems: 128
+                      type: array
+                  required:
+                  - key
+                  - nameTemplate
+                  - providerRef
+                  type: object
+                maxItems: 8
+                minItems: 1
+                type: array
+              defaultIsolation:
+                default: bridge
+                description: |-
+                  DefaultIsolation is the isolation applied to ProductDatabases that
+                  don't override it. Defaults to bridge — schema-per-tenant, the
+                  industry sweet spot.
+                enum:
+                - pool
+                - bridge
+                - silo
+                type: string
+              displayName:
+                description: DisplayName is the human-friendly label.
+                maxLength: 128
+                type: string
+              lifecycleHooks:
+                description: |-
+                  LifecycleHooks fire on tenant lifecycle transitions. Phase 4.1
+                  wires real HTTP delivery; Phase 4 surfaces intent only.
+                items:
+                  description: |-
+                    LifecycleHook describes a webhook the controller calls during
+                    transitions. Phase 4 implements this as a stub (records intent in
+                    status); Phase 4.1 wires real HTTP delivery with HMAC signing.
+                  properties:
+                    "on":
+                      description: On selects the transition that fires the hook.
+                      enum:
+                      - Activated
+                      - Deactivated
+                      - Failed
+                      type: string
+                    signingSecretRef:
+                      description: |-
+                        SigningSecretRef references a Secret in keystone-system holding
+                        the HMAC key used to sign the payload.
+                      type: string
+                    url:
+                      description: URL is the receiver endpoint. HTTPS only — admission
+                        rejects http://.
+                      maxLength: 2048
+                      pattern: ^https://
+                      type: string
+                  required:
+                  - "on"
+                  - url
+                  type: object
+                maxItems: 8
+                type: array
+              slug:
+                description: |-
+                  Slug is the URL-safe product identifier. Used in API paths,
+                  metrics labels, audit logs.
+                maxLength: 63
+                pattern: ^[a-z][a-z0-9-]*$
+                type: string
+            required:
+            - databases
+            - displayName
+            - slug
+            type: object
+          status:
+            description: ProductDefinitionStatus tracks observability rollups.
+            properties:
+              conditions:
+                description: Conditions reports the current state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              instanceCount:
+                description: |-
+                  InstanceCount is the number of ProductInstances currently
+                  referencing this definition.
+                format: int32
+                type: integer
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

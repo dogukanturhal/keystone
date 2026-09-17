@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keystone-system
+  labels:
+    app.kubernetes.io/name: keystone-system
+    app.kubernetes.io/part-of: keystone
+    # Linkerd injection so the manager's egress to PostgreSQL clusters
+    # gets mTLS for free. The legacy db-migrator does not have this.
+    linkerd.io/inject: enabled
+    # Pod Security Standards enforcement at the namespace level. The
+    # manager Pod uses runAsNonRoot, readOnlyRootFilesystem, drops all
+    # capabilities — restricted PSS is achievable.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

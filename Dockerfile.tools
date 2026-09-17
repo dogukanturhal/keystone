@@ -1,0 +1,118 @@
+# syntax=docker/dockerfile:1.7
+#
+# keystone-tools — supply-chain soak runtime image
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Pre-baked tools image consumed by the in-cluster keystone-soak
+# CronJob (<gitops-repo>/keystone/resources/soak/).
+# Replaces the previous alpine + apk-add-as-root init pattern,
+# which was blocked by the cluster's enforced PodSecurity restricted
+# baseline.
+#
+# CONTENTS
+# ========
+#   - keystonectl (built from this repo — CI jobs and the ORM
+#     migration-drift check in hexxlock/ci-components run it)
+#   - kubectl (matching cluster version)
+#   - cosign  (matching keystone CI sign-image stage)
+#   - busybox sh + standard POSIX utilities (ash, date, sha256sum,
+#     printf, sleep, grep, sed, tr, cat — all single-binary busybox)
+#   - ca-certificates
+#
+# All under uid 65532 — soak Pod runs entirely non-root, no init
+# container needed, satisfies PodSecurity restricted:latest.
+#
+# BUILD ARGS
+# ==========
+#   KUBECTL_VERSION    matches cluster (default v1.34.6)
+#   COSIGN_VERSION     matches keystone CI (default v2.6.3)
+#
+# RELEASE
+# =======
+# CI builds + signs + pushes on every keystone tag. Tag mirrors
+# keystone-manager so soak script + manager are versioned together.
+# Image: ghcr.io/dogukanturhal/keystone-tools:v0.1.x
+
+ARG ALPINE_VERSION=3.21
+# 2026-06-04 bumped v1.35.4 → v1.35.5 — expected to rebuild on Go 1.25.10
+# which clears CVE-2026-39823/39825/39826 (stdlib HIGH batch). Verified
+# against upstream stable-1.35.txt = v1.35.5 at time of bump.
+# 2026-08-02 bumped v1.35.5 -> v1.36.3: rebuilt on go1.26.5, which clears
+# CVE-2026-27145 and CVE-2026-39822 in the embedded stdlib. Its vendored
+# x/net (v0.49.0) and x/text (v0.33.0) still lag the fixed 0.55.0/0.39.0,
+# so four findings remain and are carried in .trivyignore.yaml until
+# upstream rebuilds — nothing in this repo can move a vendored dep in a
+# binary we download.
+ARG KUBECTL_VERSION=v1.37.0
+# v3.0.6 carries go.opentelemetry.io/otel v1.41.0 which fixes
+# CVE-2026-29181 (multi-value baggage header DoS amplification). v2.6.3
+# pinned otel v1.38.0 and tripped the trivy HIGH-severity gate on
+# vuln-scan-tools-image during the v0.1.60 tag pipeline.
+# 2026-08-02 bumped v3.1.1 -> v3.1.2. Same story: go1.26.4 clears
+# CVE-2026-27145, while x/text v0.38.0, grpc v1.82.0 and the stdlib still
+# sit just below the fixed versions. See .trivyignore.yaml.
+ARG COSIGN_VERSION=v3.1.2
+
+ARG GO_VERSION=1.26.5
+
+# keystonectl build stage. The tools image is what CI jobs run in, and the
+# migration-drift check in hexxlock/ci-components needs keystonectl —
+# an image whose whole purpose is tooling should carry the project's own
+# CLI rather than make every consumer `go install` it behind a PAT.
+# Mirrors the manager's build stage (see Dockerfile) so the two binaries
+# are produced identically.
+FROM mirror.gcr.io/library/golang:${GO_VERSION}-alpine AS gobuild
+RUN apk add --no-cache git
+    fi
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY api/go.mod api/go.sum ./api/
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w \
+      -X main.version=${VERSION} \
+      -X main.commit=${COMMIT} \
+      -X main.date=${BUILD_DATE}" \
+    -o /out/keystonectl ./cmd/keystonectl
+
+FROM mirror.gcr.io/library/alpine:${ALPINE_VERSION} AS fetch
+ARG KUBECTL_VERSION
+ARG COSIGN_VERSION
+RUN apk add --no-cache curl ca-certificates
+WORKDIR /tmp
+# kubectl — verified against the upstream SHA-256 manifest.
+RUN curl -sSLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+ && curl -sSLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" \
+ && echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c - \
+ && chmod 0755 kubectl
+# cosign — verified against the sigstore release checksums file.
+RUN curl -sSLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
+ && curl -sSLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign_checksums.txt" \
+ && grep ' cosign-linux-amd64$' cosign_checksums.txt | sha256sum -c - \
+ && chmod 0755 cosign-linux-amd64
+
+# Final minimal runtime — alpine for busybox + ca-certificates + sh.
+# Distroless would be smaller but loses the POSIX shell the soak script
+# needs. alpine 3.21 base with explicit non-root user keeps the surface
+# bounded.
+FROM mirror.gcr.io/library/alpine:${ALPINE_VERSION}
+LABEL org.opencontainers.image.title="keystone-tools" \
+      org.opencontainers.image.description="Soak runtime for in-cluster keystone CronJob + CI tooling (keystonectl + kubectl + cosign + busybox)" \
+      org.opencontainers.image.source="https://github.com/dogukanturhal/keystone" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+
+# Only ca-certificates — busybox provides everything else. No bash,
+# no jq, no curl in the runtime layer (the soak script uses kubectl
+# subcommands and cosign verify exclusively for HTTPS work).
+RUN apk add --no-cache ca-certificates
+
+COPY --from=fetch --chown=65532:65532 /tmp/kubectl /usr/local/bin/kubectl
+COPY --from=fetch --chown=65532:65532 /tmp/cosign-linux-amd64 /usr/local/bin/cosign
+COPY --from=gobuild --chown=65532:65532 /out/keystonectl /usr/local/bin/keystonectl
+
+USER 65532:65532
+ENTRYPOINT ["/bin/sh"]

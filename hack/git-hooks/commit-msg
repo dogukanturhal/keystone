@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Keystone DCO commit-msg hook. Rejects commits that lack a
+# Signed-off-by trailer matching the author email.
+#
+# Install via: make install-hooks
+# Manual install: ln -sf ../../hack/git-hooks/commit-msg .git/hooks/commit-msg
+
+set -euo pipefail
+
+msg_file="$1"
+
+# Skip merge/revert/amend/fixup commits — the original author's
+# sign-off propagates.
+first_line="$(head -1 "$msg_file")"
+case "$first_line" in
+  "Merge "*|"Revert "*|"fixup!"*|"squash!"*|"amend!"*) exit 0 ;;
+esac
+
+# Extract author identity from git config; this is what `git commit -s`
+# uses when appending the trailer automatically.
+author_name="$(git config user.name)"
+author_email="$(git config user.email)"
+if [[ -z "$author_name" || -z "$author_email" ]]; then
+  echo "commit-msg: git config user.name or user.email is not set" >&2
+  echo "  git config user.name 'Your Name'" >&2
+  echo "  git config user.email 'you@example.com'" >&2
+  exit 1
+fi
+
+expected="Signed-off-by: ${author_name} <${author_email}>"
+
+if ! grep -qF "$expected" "$msg_file"; then
+  cat >&2 <<EOF
+commit-msg: missing Signed-off-by trailer.
+
+Keystone uses the Developer Certificate of Origin (DCO). Every commit
+must be signed off by the author, certifying that the contribution may
+be submitted under the project's license.
+
+Expected trailer:
+  $expected
+
+Options:
+  1. Amend the commit with sign-off:
+       git commit --amend --signoff --no-edit
+  2. Next time, include -s / --signoff:
+       git commit -s -m "message"
+
+See CONTRIBUTING.md for the full DCO text (https://developercertificate.org/).
+EOF
+  exit 1
+fi
+
+# Also assert the trailer email exactly matches git config's user.email.
+# Different email = different contributor from the DCO's perspective.
+trailer_line="$(grep '^Signed-off-by:' "$msg_file" | tail -1)"
+if ! echo "$trailer_line" | grep -qF "<$author_email>"; then
+  cat >&2 <<EOF
+commit-msg: Signed-off-by email does not match git config user.email.
+
+Trailer found: $trailer_line
+Author email:  $author_email
+
+The DCO sign-off must match the commit author. Either update git config or
+amend the commit with the correct sign-off.
+EOF
+  exit 1
+fi
+
+exit 0

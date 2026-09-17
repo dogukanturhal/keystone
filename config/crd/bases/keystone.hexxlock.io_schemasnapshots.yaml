@@ -1,0 +1,826 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: schemasnapshots.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: SchemaSnapshot
+    listKind: SchemaSnapshotList
+    plural: schemasnapshots
+    shortNames:
+    - snap
+    singular: schemasnapshot
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.schemaRef
+      name: Schema
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.appliedMigrations[*]
+      name: Migrations
+      priority: 1
+      type: integer
+    - jsonPath: .status.capturedAt
+      name: CapturedAt
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SchemaSnapshot is an immutable record of a DatabaseSchema's
+          applied-migration state at a point in time. See the type's Spec
+          comment for the restore workflow.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SchemaSnapshotSpec captures a point-in-time record of a
+              DatabaseSchema's applied-migration state. Combined with the ability
+              to replay a list of MigrationBundles at the recorded versions, it's
+              Keystone's backup/restore primitive — the minimum needed to claim
+              Red Hat Operator Capability Level 3.
+
+              Operator UX is:
+
+                1. Before a risky change, declare a SchemaSnapshot. The reconciler
+                   reads schema_migrations + the inspector's drift fingerprint
+                   and freezes them into the CR's status.
+
+                2. If the risky change goes wrong, create a MigrationBundle whose
+                   source is the DIFFerence between the snapshot and the current
+                   state — the declarative differ handles the inverse in Phase
+                   12. Meanwhile, operators can use snapshots as evidence for
+                   PCI/SOC 2 change-management audits ("this is what state X
+                   looked like before we ran migration Y").
+
+              Snapshots are immutable once captured. This is enforced by the
+              reconciler, which returns immediately for any snapshot already in
+              phase Captured or Failed — not by a webhook. Nothing in-tree writes
+              to a captured snapshot; new fields must still be added as +optional
+              so that archived snapshots stay admissible against a newer CRD.
+            properties:
+              reason:
+                description: |-
+                  Reason is a human-readable description of why the snapshot was
+                  taken. Surfaced in audit log entries and restore UIs.
+                maxLength: 1024
+                type: string
+              retentionDays:
+                default: 365
+                description: |-
+                  RetentionDays is the floor before a future cleanup job may prune
+                  this snapshot. Default 365. Set higher for regulatory holds.
+                format: int32
+                maximum: 36500
+                minimum: 1
+                type: integer
+              schemaRef:
+                description: |-
+                  SchemaRef names the DatabaseSchema the snapshot captures. The
+                  reconciler requires the referenced DatabaseSchema to be Ready
+                  at capture time; transient schemas aren't snapshotted.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+            required:
+            - schemaRef
+            type: object
+          status:
+            description: |-
+              SchemaSnapshotStatus captures the observed state at snapshot time.
+              Once `phase=Captured`, every field here is immutable — subsequent
+              reconciles observe them as-is and do not mutate.
+            properties:
+              appliedMigrations:
+                description: |-
+                  AppliedMigrations is the ordered list of (version, contentHash)
+                  pairs from the target's schema_migrations table at capture
+                  time. The order matches apply order — lexicographic version
+                  ascending, consistent with golang-migrate.
+                items:
+                  description: |-
+                    AppliedMigrationRecord is one row captured from the target's
+                    schema_migrations table. Shape matches
+                    `internal/migration.AppliedMigration` to keep the reconciler's
+                    translation trivial.
+                  properties:
+                    appliedAt:
+                      description: AppliedAt is the timestamp the tracking table carries.
+                      format: date-time
+                      type: string
+                    contentHash:
+                      description: |-
+                        ContentHash is the SHA-256 hex over the migration's resolved
+                        source at apply time. Empty string for entries from legacy
+                        tables (e.g. golang-migrate's shape) that didn't record it.
+                      maxLength: 64
+                      type: string
+                    version:
+                      description: |-
+                        Version is the migration version as recorded in the tracking
+                        table. Preserved verbatim — stringified even for legacy integer-
+                        shaped tables.
+                      maxLength: 128
+                      type: string
+                  required:
+                  - version
+                  type: object
+                maxItems: 8192
+                type: array
+              autoSource:
+                description: |-
+                  AutoSource identifies the MigrationExecution that triggered
+                  automatic capture. Empty for manually-created snapshots. Pattern:
+                  "<bundle>@<version>". Useful for querying "find the snapshot
+                  that recorded the post-apply state of bundle X version Y".
+                maxLength: 320
+                type: string
+              capturedAt:
+                description: CapturedAt is when the snapshot was frozen.
+                format: date-time
+                type: string
+              checksumSha256:
+                description: |-
+                  ChecksumSHA256 is the SHA-256 over a canonical encoding of
+                  AppliedMigrations + Fingerprint. Immutability evidence:
+                  downstream tooling can recompute and verify after restore.
+                maxLength: 64
+                pattern: ^[0-9a-f]{64}$
+                type: string
+              conditions:
+                description: Conditions follow Kubernetes conventions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              erd:
+                description: |-
+                  ERD is a Mermaid erDiagram representation of the schema at
+                  capture time. Rendered from the drift inspector's structural
+                  snapshot — tables, columns, PKs, FKs, unique constraints.
+                  HexxForge UI and GitLab markdown render this natively.
+                maxLength: 1048576
+                type: string
+              fingerprint:
+                description: |-
+                  Fingerprint is the drift-inspector fingerprint at capture time.
+                  Downstream verifiers compare against a fresh inspection to
+                  detect drift since the snapshot.
+                maxLength: 128
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the snapshot lifecycle state.
+                enum:
+                - Pending
+                - Capturing
+                - Captured
+                - Failed
+                type: string
+              structure:
+                description: |-
+                  Structure is the structured representation of the schema shape
+                  — tables, columns, indexes, constraints — captured from the
+                  drift inspector at the same instant as Fingerprint/ERD. Serves
+                  as the authoritative artifact for snapshot-to-snapshot diff
+                  (`keystonectl snapshot diff`). Populated alongside ERD; the ERD
+                  stays for human-readable rendering and Structure for machine
+                  analysis.
+                properties:
+                  constraints:
+                    description: |-
+                      Constraints covers primary keys, unique constraints, checks,
+                      foreign keys, exclusions — read from pg_constraint.
+                    items:
+                      description: |-
+                        SnapshotObjectDDL is the generic name+definition pair used for
+                        indexes and constraints. Definition is the canonical PG-emitted
+                        DDL (pg_get_indexdef / pg_get_constraintdef) so diffs can compare
+                        byte-exact definitions without re-parsing.
+                      properties:
+                        definition:
+                          description: Definition is the canonical DDL. Used for byte-exact
+                            diff.
+                          maxLength: 4096
+                          type: string
+                        name:
+                          description: Name of the object.
+                          maxLength: 63
+                          type: string
+                        table:
+                          description: |-
+                            Table is the object's parent table, empty for schema-level
+                            objects.
+                          maxLength: 63
+                          type: string
+                        type:
+                          description: |-
+                            Type discriminates the object: btree/hash/gin/... for indexes,
+                            PRIMARY KEY/UNIQUE/CHECK/FOREIGN KEY/EXCLUDE for constraints.
+                          maxLength: 32
+                          type: string
+                      required:
+                      - definition
+                      - name
+                      type: object
+                    maxItems: 4096
+                    type: array
+                  enums:
+                    description: |-
+                      Enums is every enum type owned by the schema, read from pg_type
+                      and pg_enum in sort order.
+
+                      Empty means "no enums" only when ModelVersion >= 2; below that it
+                      means the capturing controller did not look. The same holds for
+                      every field below.
+                    items:
+                      description: SnapshotEnum is one enum type and its labels.
+                      properties:
+                        labels:
+                          description: |-
+                            Labels in PostgreSQL's sort order (pg_enum.enumsortorder), which
+                            is the order the labels compare in, not the order they were
+                            declared. Order is therefore semantic here — unlike a policy's
+                            role list — and a reordered label list is a real change: it
+                            silently reverses every ORDER BY and range comparison on the
+                            column.
+                          items:
+                            type: string
+                          maxItems: 1024
+                          type: array
+                        name:
+                          description: Name of the enum type.
+                          maxLength: 63
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 1024
+                    type: array
+                  extensions:
+                    description: |-
+                      Extensions is every extension installed *into* this schema. An
+                      extension the schema merely depends on but does not own — the
+                      usual pgcrypto in public — belongs to LogicalDatabase.spec, which
+                      is the layer that owns database-scoped objects.
+                    items:
+                      description: SnapshotExtension is one extension installed into
+                        the schema.
+                      properties:
+                        name:
+                          description: Name of the extension.
+                          maxLength: 63
+                          type: string
+                        schema:
+                          description: |-
+                            Schema the extension is installed into. Recorded even though the
+                            snapshot describes one schema, because the inspector reports it
+                            and a mismatch is a signal the capture is not what it claims.
+                          maxLength: 63
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 256
+                    type: array
+                  functions:
+                    description: |-
+                      Functions is every function and procedure in the schema,
+                      including bodies.
+                    items:
+                      description: |-
+                        SnapshotFunction is one function or procedure, body included.
+
+                        Functions are overloadable, so Name alone does not identify one —
+                        (Name, Args) does. A reader that keys on the name will collapse an
+                        overload set and can report a dropped overload as unchanged, the same
+                        way keying a policy on its bare name collapses two tables' policies.
+                      properties:
+                        args:
+                          description: |-
+                            Args is the argument list as pg_get_function_arguments renders
+                            it. Part of the identity, not a detail.
+                          maxLength: 4096
+                          type: string
+                        definition:
+                          description: |-
+                            Definition is the function body verbatim.
+
+                            Captured because the body is where a security-relevant change
+                            hides: a SECURITY DEFINER helper, or the current_tenant() a
+                            policy's USING clause calls, can be rewritten without touching
+                            its signature. A snapshot that recorded only the signature would
+                            report no change across exactly that edit.
+                          maxLength: 131072
+                          type: string
+                        language:
+                          description: 'Language the function is written in: sql,
+                            plpgsql, c, …'
+                          maxLength: 64
+                          type: string
+                        name:
+                          description: Name of the function.
+                          maxLength: 63
+                          type: string
+                        returns:
+                          description: Returns is the result type as pg_get_function_result
+                            renders it.
+                          maxLength: 1024
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 1024
+                    type: array
+                  indexes:
+                    description: |-
+                      Indexes is the list of CREATE INDEX definitions harvested from
+                      pg_indexes. Type carries btree/hash/gin/etc.
+                    items:
+                      description: |-
+                        SnapshotObjectDDL is the generic name+definition pair used for
+                        indexes and constraints. Definition is the canonical PG-emitted
+                        DDL (pg_get_indexdef / pg_get_constraintdef) so diffs can compare
+                        byte-exact definitions without re-parsing.
+                      properties:
+                        definition:
+                          description: Definition is the canonical DDL. Used for byte-exact
+                            diff.
+                          maxLength: 4096
+                          type: string
+                        name:
+                          description: Name of the object.
+                          maxLength: 63
+                          type: string
+                        table:
+                          description: |-
+                            Table is the object's parent table, empty for schema-level
+                            objects.
+                          maxLength: 63
+                          type: string
+                        type:
+                          description: |-
+                            Type discriminates the object: btree/hash/gin/... for indexes,
+                            PRIMARY KEY/UNIQUE/CHECK/FOREIGN KEY/EXCLUDE for constraints.
+                          maxLength: 32
+                          type: string
+                      required:
+                      - definition
+                      - name
+                      type: object
+                    maxItems: 4096
+                    type: array
+                  materializedViews:
+                    description: |-
+                      MaterializedViews is every materialized view in the schema with
+                      its defining SELECT. Refresh state is not recorded, for the same
+                      reason sequence values are not.
+                    items:
+                      description: |-
+                        SnapshotMaterializedView is one materialized view and its defining
+                        SELECT.
+                      properties:
+                        definition:
+                          description: Definition is the SELECT verbatim, as pg_matviews
+                            reports it.
+                          maxLength: 131072
+                          type: string
+                        name:
+                          description: Name of the materialized view.
+                          maxLength: 63
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 512
+                    type: array
+                  modelVersion:
+                    description: "ModelVersion records which model of this struct
+                      the capturing\ncontroller was built against, so a reader can
+                      tell \"this schema\nhad no policies\" from \"this snapshot could
+                      not see policies\".\n\n\t0 — implicit. Captured before row-level
+                      security was modelled:\n\t    tables, indexes and constraints
+                      only.\n\t1 — adds row-level security: per-table RLSEnabled/RLSForced
+                      and\n\t    the schema's Policies list.\n\t2 — adds the remaining
+                      objects the inspector reads: Enums,\n\t    Extensions, Sequences,
+                      Functions, Triggers,\n\t    MaterializedViews, and per-view
+                      ViewDefinition.\n\nThe version is a single counter over the
+                      whole struct rather than\na flag per dimension, because it answers
+                      one question — \"was this\nfield populated by a controller that
+                      knew about it?\" — and every\ndimension added in the same release
+                      shares one answer. A reader\ncompares a dimension only at or
+                      above the version that introduced\nit, and says so out loud
+                      below that.\n\nSnapshots are immutable once captured and are
+                      retained for at\nleast a year — up to a century under a regulatory
+                      hold — so the\nregistry holds documents from every model that
+                      has ever shipped,\npermanently. There is no migration to run
+                      and no point at which\nversion 0 stops appearing.\n\nDeliberately
+                      NOT +kubebuilder:default. Structural-schema\ndefaulting is applied
+                      when an unset field is read back out of\netcd, so a default
+                      would relabel every older snapshot in the\nregistry as aware
+                      of dimensions nobody captured — inverting the\nexact property
+                      this field exists to provide."
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  policies:
+                    description: |-
+                      Policies is every row-level security policy in the schema, read
+                      from pg_policies and sorted by (table, name).
+
+                      Empty means "no policies" only when ModelVersion >= 1; at
+                      version 0 it means the capturing controller did not look.
+                    items:
+                      description: |-
+                        SnapshotPolicy is one row-level security policy as pg_policies
+                        reports it. Together with SnapshotTable's RLSEnabled/RLSForced this
+                        is the whole of a schema's tenant-isolation posture, which is why a
+                        snapshot that omits it cannot serve as the change-management
+                        evidence this type claims to be: dropping a policy, or flipping a
+                        table to NO FORCE, left the captured structure byte-identical.
+                      properties:
+                        command:
+                          description: |-
+                            Command the policy governs: ALL, SELECT, INSERT, UPDATE or
+                            DELETE.
+                          maxLength: 16
+                          type: string
+                        name:
+                          description: Name of the policy. Unique per table, not per
+                            schema.
+                          maxLength: 63
+                          type: string
+                        permissive:
+                          description: |-
+                            Permissive is true for PERMISSIVE policies (OR-combined, the
+                            PostgreSQL default) and false for RESTRICTIVE ones (AND-combined).
+                            Recorded explicitly rather than by omission: the two combine in
+                            opposite directions, so an evidence document has to state which.
+
+                            Required, unlike SnapshotTable.RLSEnabled. The back-compat hazard
+                            that forces that one optional does not exist here: no snapshot
+                            captured before model version 1 carries a policy list at all, so
+                            there is no stored SnapshotPolicy that could be missing the
+                            field. Requiring it stops a hand-authored policy from omitting it
+                            and silently meaning RESTRICTIVE.
+                          type: boolean
+                        roles:
+                          description: |-
+                            Roles the policy applies to. A single "public" entry means all
+                            roles.
+                          items:
+                            type: string
+                          maxItems: 256
+                          type: array
+                        table:
+                          description: Table the policy is attached to.
+                          maxLength: 63
+                          type: string
+                        using:
+                          description: |-
+                            Using is the USING expression — the row filter applied to reads
+                            and to the pre-image of writes.
+                          maxLength: 4096
+                          type: string
+                        withCheck:
+                          description: |-
+                            WithCheck is the WITH CHECK expression — the predicate new rows
+                            must satisfy. Empty means PostgreSQL falls back to Using.
+                          maxLength: 4096
+                          type: string
+                      required:
+                      - name
+                      - permissive
+                      - table
+                      type: object
+                    maxItems: 4096
+                    type: array
+                  schema:
+                    description: |-
+                      Schema is the target schema name. Copied from the parent
+                      SchemaSnapshot for self-contained diffing; any mismatch
+                      between this and SchemaRef indicates CR corruption.
+                    maxLength: 63
+                    type: string
+                  sequences:
+                    description: |-
+                      Sequences is every sequence in the schema with its bounds and
+                      step. The current value is deliberately absent: it changes on
+                      every INSERT, and a structural snapshot that moved whenever the
+                      data moved would report drift continuously.
+                    items:
+                      description: SnapshotSequence is one sequence's shape.
+                      properties:
+                        dataType:
+                          description: |-
+                            DataType backing the sequence: smallint, integer or bigint. This
+                            is the ceiling on how many values it can ever hand out, so a
+                            change to it is a change to the table's capacity.
+                          maxLength: 32
+                          type: string
+                        incrementBy:
+                          description: IncrementBy is the step. Negative for a descending
+                            sequence.
+                          format: int64
+                          type: integer
+                        maxValue:
+                          description: MaxValue is the upper bound.
+                          format: int64
+                          type: integer
+                        minValue:
+                          description: MinValue is the lower bound.
+                          format: int64
+                          type: integer
+                        name:
+                          description: Name of the sequence.
+                          maxLength: 63
+                          type: string
+                        startValue:
+                          description: StartValue is the value the sequence restarts
+                            to.
+                          format: int64
+                          type: integer
+                      required:
+                      - name
+                      type: object
+                    maxItems: 2048
+                    type: array
+                  tables:
+                    description: |-
+                      Tables is the ordered list of base tables and views in the
+                      schema, excluding Keystone's bookkeeping tables
+                      (schema_migrations, keystone_baselines).
+                    items:
+                      description: SnapshotTable captures one table's columns.
+                      properties:
+                        columns:
+                          description: Columns in ordinal (position) order.
+                          items:
+                            description: |-
+                              SnapshotColumn captures one column's shape. DataType + UDTName are
+                              both preserved because PG exposes both (data_type "integer" vs
+                              udt_name "int4"); downstream tools may prefer one or the other.
+                            properties:
+                              dataType:
+                                description: |-
+                                  DataType is the information_schema.data_type value ("text",
+                                  "integer", "timestamp with time zone", etc.).
+                                maxLength: 64
+                                type: string
+                              default:
+                                description: Default is the column_default expression,
+                                  empty when no default.
+                                maxLength: 1024
+                                type: string
+                              name:
+                                description: Name of the column.
+                                maxLength: 63
+                                type: string
+                              nullable:
+                                description: Nullable is the is_nullable flag.
+                                type: boolean
+                              ordinal:
+                                description: |-
+                                  Ordinal is the 1-based column position. Matches information_
+                                  schema.columns.ordinal_position so reordering is detectable.
+                                format: int32
+                                minimum: 1
+                                type: integer
+                              udtName:
+                                description: |-
+                                  UDTName is the udt_name ("text", "int4", "timestamptz"). More
+                                  canonical than DataType for non-standard types.
+                                maxLength: 64
+                                type: string
+                            required:
+                            - name
+                            - nullable
+                            - ordinal
+                            type: object
+                          maxItems: 1600
+                          type: array
+                        kind:
+                          description: |-
+                            Kind is the PostgreSQL-reported table_type ("BASE TABLE",
+                            "VIEW", "FOREIGN", etc.).
+                          maxLength: 32
+                          type: string
+                        name:
+                          description: Name of the table.
+                          maxLength: 63
+                          type: string
+                        rlsEnabled:
+                          description: |-
+                            RLSEnabled mirrors pg_class.relrowsecurity — whether row-level
+                            security is turned on for this table at all.
+
+                            Only meaningful when the parent's ModelVersion >= 1.
+
+                            The json tag carries no omitempty, so the controller always
+                            writes it: this is a security fact and an evidence document
+                            should assert it rather than imply it by absence.
+
+                            It is nonetheless +optional in the schema. Tables captured before
+                            this field existed do not carry it, and this type's whole purpose
+                            is that an archived snapshot can be brought back — replayed as
+                            restore evidence, or re-applied into a rebuilt cluster. A
+                            required field would make every pre-RLS snapshot YAML in the
+                            archive fail admission against the new CRD, which is precisely
+                            the artifact the registry exists to keep usable.
+                          type: boolean
+                        rlsForced:
+                          description: |-
+                            RLSForced mirrors pg_class.relforcerowsecurity — whether RLS
+                            also applies to the table's OWNER. This is the bit that usually
+                            matters: ENABLE alone exempts the owner, so if the application
+                            connects as the role that owns its tables (the common case) then
+                            ENABLE-without-FORCE means every policy on the table is bypassed
+                            for exactly the connection the policies exist to constrain. On a
+                            multi-tenant schema that is a cross-tenant read.
+
+                            A pointer because nil must mean "this snapshot predates the
+                            field", not "not forced". Snapshots are immutable, so pre-RLS
+                            captures keep a nil here for as long as they are retained;
+                            decoding that as false would report FORCE as newly added on
+                            every table of every old snapshot compared against a new one.
+                            The parent's ModelVersion is the authoritative signal — this
+                            nil is the per-table corroboration of it.
+                          type: boolean
+                        viewDefinition:
+                          description: |-
+                            ViewDefinition is the defining SELECT, populated only when Kind
+                            is VIEW. Empty for base tables.
+
+                            A view's columns are the same before and after its WHERE clause
+                            is rewritten, so a snapshot holding only the column list cannot
+                            tell a view that filters by tenant from one that no longer does.
+
+                            Only meaningful when the parent's ModelVersion >= 2.
+                          maxLength: 131072
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 2048
+                    type: array
+                  triggers:
+                    description: |-
+                      Triggers is every user trigger in the schema, sorted by (table,
+                      name). Internal triggers — the ones PostgreSQL creates to enforce
+                      foreign keys — are excluded by the inspector; they are an
+                      implementation detail of the constraints already captured, and
+                      recording them would report the same fact twice.
+                    items:
+                      description: |-
+                        SnapshotTrigger is one trigger binding.
+
+                        Trigger names are unique per table, not per schema, so (Table, Name)
+                        is the identity.
+                      properties:
+                        events:
+                          description: |-
+                            Events the trigger fires on: INSERT, UPDATE, DELETE, TRUNCATE.
+
+                            The inspector builds this list positionally from pg_trigger's
+                            tgtype bitfield, so its order is fixed by the query rather than
+                            by the catalog and is stable across captures.
+                          items:
+                            type: string
+                          maxItems: 4
+                          type: array
+                        forEachRow:
+                          description: |-
+                            ForEachRow distinguishes a row trigger from a statement trigger,
+                            which decides how many times the function runs.
+
+                            Required, like SnapshotPolicy.Permissive and unlike
+                            SnapshotTable.RLSEnabled. The rule is the same in all three
+                            places: a field is optional exactly when an archived snapshot
+                            could lack it. No snapshot captured below model version 2 carries
+                            a trigger list at all, so there is no archive to keep admissible,
+                            and requiring it stops a hand-authored trigger that omits the key
+                            from silently meaning FOR EACH STATEMENT.
+                          type: boolean
+                        function:
+                          description: |-
+                            Function the trigger calls. Its body is captured separately, in
+                            Functions — a rewritten trigger function changes nothing here.
+                          maxLength: 63
+                          type: string
+                        name:
+                          description: Name of the trigger.
+                          maxLength: 63
+                          type: string
+                        table:
+                          description: Table the trigger is attached to.
+                          maxLength: 63
+                          type: string
+                        timing:
+                          description: Timing is BEFORE, AFTER or INSTEAD OF.
+                          maxLength: 16
+                          type: string
+                        when:
+                          description: |-
+                            When is the optional WHEN clause, extracted from
+                            pg_get_triggerdef. Empty when the trigger has none.
+                          maxLength: 4096
+                          type: string
+                      required:
+                      - forEachRow
+                      - name
+                      - table
+                      type: object
+                    maxItems: 2048
+                    type: array
+                required:
+                - schema
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

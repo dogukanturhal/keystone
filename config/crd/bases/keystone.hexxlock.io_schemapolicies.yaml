@@ -1,0 +1,534 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: schemapolicies.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: SchemaPolicy
+    listKind: SchemaPolicyList
+    plural: schemapolicies
+    shortNames:
+    - sp
+    - schemapol
+    singular: schemapolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.minLintLevel
+      name: MinLevel
+      type: string
+    - jsonPath: .status.matchingBundles
+      name: Bundles
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SchemaPolicy declares the rules MigrationBundles must satisfy. Cluster-
+          scoped because policies are platform-wide governance.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SchemaPolicySpec describes the rules that apply to MigrationBundles
+              matching this policy. Multiple policies may apply to the same bundle;
+              when they do, the strictest setting wins per-rule.
+            properties:
+              allowedStrategies:
+                description: |-
+                  AllowedStrategies is the set of MigrationBundle.spec.strategy
+                  values this policy permits. Empty means any. Use to forbid raw
+                  `versioned` migrations on production schemas, requiring
+                  `pgroll-expand-contract` for zero-downtime guarantees.
+                items:
+                  type: string
+                maxItems: 8
+                type: array
+              approvalPolicies:
+                description: |-
+                  ApprovalPolicies is the N-of-M approval workflow. Every matched
+                  MigrationBundle must satisfy each policy in turn before
+                  admission accepts it. A bundle with zero policies bypasses this
+                  gate — suitable for canary tiers; production tiers ship at
+                  least one policy.
+
+                  Each policy declares:
+                    - RequiredApprovers — count of distinct approvers needed
+                    - FromGroups        — identity groups that may satisfy the count
+                    - AppliesWhen       — conditional expression on bundle metadata
+                                          (label selector + lint-finding threshold)
+
+                  Satisfaction evidence lives under MigrationBundle.metadata.annotations
+                  with keys of the form:
+                    keystone.hexxlock.io/approval.<policy-name>.<approver-id>=<token>
+
+                  Tokens are short-lived signed JWTs issued by the Keystone
+                  approval-issuer webhook (Phase 12.2). Today we accept raw
+                  CODEOWNERS signatures; JWT issuance lands with the UI.
+                items:
+                  description: |-
+                    ApprovalPolicy is one row in a SchemaPolicy's N-of-M approval
+                    workflow. Modelled after PCI DSS Req 6.5 / SOC 2 CC8 change-
+                    management segregation-of-duties: an author cannot approve their
+                    own change; approvals must come from named identity groups; the
+                    apiserver records the approver's identity (see AuditEntry).
+
+                    Conditional application lets operators declare, e.g.:
+                      "production tier bundles that touch the 'users' schema need 2
+                       approvals from group 'data-platform-seniors'"
+                      "any bundle with ≥1 warning lint finding needs 1 approval from
+                       group 'schema-reviewers'"
+                  properties:
+                    appliesWhen:
+                      description: |-
+                        AppliesWhen is the conditional gate that decides whether this
+                        policy fires against a given bundle. Default (empty) = always.
+                      properties:
+                        bundleSelector:
+                          description: |-
+                            BundleSelector is a label selector on the MigrationBundle. An
+                            empty selector matches every bundle.
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector
+                                requirements. The requirements are ANDed.
+                              items:
+                                description: |-
+                                  A label selector requirement is a selector that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector
+                                      applies to.
+                                    type: string
+                                  operator:
+                                    description: |-
+                                      operator represents a key's relationship to a set of values.
+                                      Valid operators are In, NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: |-
+                                      values is an array of string values. If the operator is In or NotIn,
+                                      the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                      the values array must be empty. This array is replaced during a strategic
+                                      merge patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                    x-kubernetes-list-type: atomic
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                              x-kubernetes-list-type: atomic
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                operator is "In", and the values array contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        minLintSeverity:
+                          description: |-
+                            MinLintSeverity, if set, fires the policy only when the bundle
+                            has at least one lint finding at or above this severity. Useful
+                            for "needs senior review when there's any warning."
+                          enum:
+                          - error
+                          - warning
+                          - notice
+                          type: string
+                        riskTier:
+                          description: |-
+                            RiskTier names the risk category the bundle must carry to
+                            trigger this policy. Read from the annotation
+                            `keystone.hexxlock.io/risk-tier` on the MigrationBundle. Typical
+                            values: low, medium, high, critical. Empty = any tier.
+                          maxLength: 32
+                          pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                      type: object
+                    disallowSelfApproval:
+                      default: true
+                      description: |-
+                        DisallowSelfApproval requires at least one approver to differ
+                        from the bundle's author (recorded in metadata.annotations
+                        under `keystone.hexxlock.io/author`). Default true — mandatory
+                        separation of duties per SOC 2 CC8. Set to false only for
+                        non-production tiers with documented compensating controls.
+                      type: boolean
+                    fromGroups:
+                      description: |-
+                        FromGroups is the allowed identity groups. An approver's
+                        membership in any listed group satisfies the "from" clause.
+                        Enforced by the approval-issuer webhook — the admission webhook
+                        accepts the signed token without re-checking group membership
+                        (JWT carries the subject + group claims at issuance time).
+                      items:
+                        type: string
+                      maxItems: 16
+                      minItems: 1
+                      type: array
+                    name:
+                      description: |-
+                        Name is the stable identifier used in the annotation-key pattern
+                        `keystone.hexxlock.io/approval.<name>.<approver>=<token>`.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    requiredApprovers:
+                      description: |-
+                        RequiredApprovers is the count of distinct approver identities
+                        required to satisfy this policy. One identity cannot count
+                        twice regardless of which groups they belong to.
+                      format: int32
+                      maximum: 16
+                      minimum: 1
+                      type: integer
+                  required:
+                  - fromGroups
+                  - name
+                  - requiredApprovers
+                  type: object
+                maxItems: 16
+                type: array
+              blockedKeywords:
+                description: |-
+                  BlockedKeywords is a list of SQL keywords the policy refuses to
+                  permit. Common values: DROP TABLE, DROP COLUMN, TRUNCATE,
+                  DROP DATABASE. Case-insensitive substring match. Bypass is by
+                  adding `keystone.hexxlock.io/policy-override: true` annotation
+                items:
+                  type: string
+                maxItems: 32
+                type: array
+              devDatabaseRef:
+                description: |-
+                  DevDatabaseRef is an optional reference to a DatabaseProvider
+                  that hosts a dev database for semantic migration analysis. When
+                  set, the MigrationBundle reconciler replays migrations against
+                  an ephemeral schema in this database to catch semantic errors
+                  that static analysis misses (invalid SQL, type mismatches, FK
+                  reference errors, etc.). This is Keystone's equivalent of
+                  Atlas's --dev-url pattern.
+
+                  The referenced DatabaseProvider should point to a dedicated dev
+                  database — NOT a production database. The reconciler creates
+                  temporary schemas (ks_dev_*) and drops them after each lint run.
+                maxLength: 253
+                type: string
+              expressions:
+                description: |-
+                  Expressions is a list of CEL (Common Expression Language) rules
+                  the webhook evaluates at admission time against every matched
+                  MigrationBundle. Each rule's expression must evaluate to a bool;
+                  true means the rule fires (warning or rejection, depending on
+                  severity). See docs/adrs/0023 for the activation variable shape
+                  and examples.
+
+                  CEL rules coexist with hardcoded fields above — they don't
+                  replace AllowedStrategies / BlockedKeywords / etc. Use CEL for
+                  policy dimensions Keystone doesn't model as first-class fields
+                  ("forbid prod bundles that include DROP COLUMN AND have no
+                  approval annotation", "reject any bundle missing a Jira ticket
+                  label", etc.).
+                items:
+                  description: |-
+                    CELRule is one Common Expression Language rule evaluated at
+                    admission time. Expressions return a bool — true means "this rule
+                    fires". Severity controls whether the fire blocks admission
+                    (Error) or surfaces as a warning (Warning).
+
+                    Activation variables available to expressions:
+
+                      - bundle:       MigrationBundle fields (metadata, spec)
+                      - findings:     []LintFinding from the analyzer pass
+                      - strategy:     shortcut for bundle.spec.strategy
+                      - labels:       shortcut for bundle.metadata.labels (map)
+                      - annotations:  shortcut for bundle.metadata.annotations (map)
+                      - version:      shortcut for bundle.spec.version
+
+                    Example expressions:
+
+                      - `strategy == "versioned" && size(bundle.spec.operations) > 0`
+                      - `labels["tier"] == "prod" && findings.exists(f, f.severity == "warning")`
+                      - `!("keystone.hexxlock.io/jira" in annotations)`
+                  properties:
+                    expression:
+                      description: |-
+                        Expression is the CEL source. Must compile against Keystone's
+                        activation variables and return a boolean. Rules that fail to
+                        compile produce a ConfigurationError at admission — they do
+                        NOT silently disable.
+                      maxLength: 4096
+                      type: string
+                    message:
+                      description: |-
+                        Message is the human-readable rejection/warning text. Keep it
+                        specific — operators reading admission output want to know
+                        what's wrong and how to fix. Leave empty for a generic
+                        "<rule-name> fired" message.
+                      maxLength: 1024
+                      type: string
+                    name:
+                      description: |-
+                        Name is the rule's stable identifier. Surfaced in rejection
+                        messages and warning output. Required.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    severity:
+                      allOf:
+                      - enum:
+                        - Warning
+                        - Error
+                      - enum:
+                        - Warning
+                        - Error
+                      default: Error
+                      description: |-
+                        Severity selects the admission action when the expression
+                        evaluates true:
+
+                          - Warning: appended to admission warnings; bundle admits.
+                          - Error:   rejects admission with Message + expression text.
+
+                        Defaults to Error (strictest outcome) so forgetting severity
+                        fails loud.
+                      type: string
+                  required:
+                  - expression
+                  - name
+                  type: object
+                maxItems: 32
+                type: array
+              integrity:
+                description: |-
+                  Integrity opts in to keystone.sum-based directory integrity
+                  enforcement for matched bundles. Default (nil) is advisory — the
+                  controller still verifies any committed sum, but a missing sum
+                  does not block admission. See docs/adrs/0015 for rollout guidance.
+                properties:
+                  requireSumFile:
+                    default: false
+                    description: |-
+                      RequireSumFile rejects any matched MigrationBundle whose resolved
+                      source does not contain a keystone.sum. Default false — Phase A1
+                      ships in advisory mode so existing bundles keep admitting while
+                      authors add sums. Flip to true in Phase A3 once every bundle in
+                      the cluster carries a sum.
+                    type: boolean
+                type: object
+              maxStatementsPerMigration:
+                default: 50
+                description: |-
+                  MaxStatementsPerMigration caps a single migration file's statement
+                  count. Long migrations correlate with long-running locks; the cap
+                  pushes operators toward smaller, reversible chunks.
+                format: int32
+                maximum: 10000
+                minimum: 1
+                type: integer
+              minLintLevel:
+                default: error
+                description: |-
+                  MinLintLevel is the lowest severity that fails admission. Default
+                  is `error` — warnings and notices surface in status but do not
+                  block. Set to `warning` to gate stricter, or `notice` for the
+                  strictest possible.
+                enum:
+                - error
+                - warning
+                - notice
+                type: string
+              planApproval:
+                allOf:
+                - enum:
+                  - Auto
+                  - Manual
+                - enum:
+                  - Auto
+                  - Manual
+                description: |-
+                  PlanApproval selects the Plan-Gate-Apply mode for matched
+                  MigrationBundles. Auto (default) flips each plan's
+                  spec.approved=true automatically so executions fire without a
+                  human in the loop. Manual leaves plans at spec.approved=false
+                  until a reviewer explicitly approves — the canonical production
+                  gate. When multiple matched policies disagree, Manual wins
+                  (strictest rule). See docs/adrs/0016 for the approval trust model
+                  and docs/adrs/0017 for the Plan-Gate-Apply lifecycle.
+                type: string
+              requireApproval:
+                description: |-
+                  RequireApproval lists annotations that the admission webhook must
+                  see on the MigrationBundle. Each entry is the annotation key; the
+                  value of the annotation must match the GitLab CODEOWNERS approval
+                  signature posted by CI. Empty list = no approval gate (suitable
+                  for canary tier).
+
+                  Deprecated: Use ApprovalPolicies for N-of-M / role-based / risk-
+                  tier-conditional approvals. RequireApproval is kept for backward
+                  compatibility and will be removed in v1beta1.
+                items:
+                  type: string
+                maxItems: 8
+                type: array
+              targetSelector:
+                description: |-
+                  TargetSelector picks the MigrationBundles this policy governs.
+                  Match is by metadata.labels using standard label selectors.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - targetSelector
+            type: object
+          status:
+            description: SchemaPolicyStatus tracks how often the policy fires.
+            properties:
+              conditions:
+                description: Conditions reports the current state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              matchingBundles:
+                description: |-
+                  MatchingBundles is the count of MigrationBundles currently matched
+                  by this policy. Surfaced for ops visibility — a policy with zero
+                  matches is dead code.
+                format: int32
+                type: integer
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

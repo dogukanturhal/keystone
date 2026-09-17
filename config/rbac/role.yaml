@@ -1,0 +1,126 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keystone-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - keystone.hexxlock.io
+  resources:
+  - auditentries
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - keystone.hexxlock.io
+  resources:
+  - auditlogs
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - keystone.hexxlock.io
+  resources:
+  - auditlogs/status
+  - databaseproviders/status
+  - databaseschemas/status
+  - driftreports/status
+  - logicaldatabases/status
+  - migrationbundles/status
+  - migrationexecutions/status
+  - migrationplans/status
+  - productdefinitions/status
+  - productinstances/status
+  - schemadefinitions/status
+  - schemasnapshots/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - keystone.hexxlock.io
+  resources:
+  - databaseproviders
+  - productdefinitions
+  - schemapolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - keystone.hexxlock.io
+  resources:
+  - databaseschemas
+  - driftreports
+  - logicaldatabases
+  - migrationbundles
+  - migrationexecutions
+  - migrationplans
+  - productinstances
+  - schemadefinitions
+  - schemasnapshots
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - keystone.hexxlock.io
+  resources:
+  - databaseschemas/finalizers
+  - logicaldatabases/finalizers
+  - migrationbundles/finalizers
+  - migrationexecutions/finalizers
+  - productinstances/finalizers
+  - schemadefinitions/finalizers
+  verbs:
+  - update

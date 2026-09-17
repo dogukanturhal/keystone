@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample ClusterRegistration — the hub itself running as the only canary
+# cluster. Phase 7 will register a second cluster as `tier: free` once
+# multi-cluster rollout is wired.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: ClusterRegistration
+metadata:
+  name: prod-eu-west-1-hub
+  labels:
+    keystone.hexxlock.io/role: hub-and-only
+spec:
+  displayName: "Production EU-TR-1a (hub + sole canary)"
+  tier: canary
+  region: eu-west-1
+  dataResidency: eu
+  labels:
+    extensions-allowlist: "uuid-ossp,pgcrypto,pg_stat_statements,citus,vector"
+    cni: cilium
+    storage: rook-ceph

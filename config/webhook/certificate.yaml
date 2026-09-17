@@ -1,0 +1,53 @@
+# cert-manager Certificate for the Keystone webhook server.
+# Issues a TLS cert that controller-runtime's webhook server
+# reads from /tmp/k8s-webhook-server/serving-certs/
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keystone-webhook-cert
+  namespace: keystone-system
+spec:
+  secretName: keystone-webhook-server-cert
+  dnsNames:
+    - keystone-manager-webhook.keystone-system.svc
+    - keystone-manager-webhook.keystone-system.svc.cluster.local
+  # The issuer must already exist — neither this overlay nor the Helm
+  # chart ships one, so an install against a cluster without it leaves the
+  # Certificate stuck Pending and the webhook server without a serving
+  # cert. Matches the chart default (webhook.certManager.issuerRef); point
+  # both at whatever issuer your cluster uses.
+  #
+  # For a standalone install, a self-signed issuer is enough:
+  #   kubectl apply -f - <<'EOF'
+  #   apiVersion: cert-manager.io/v1
+  #   kind: Issuer
+  #   metadata: {name: selfsigned, namespace: keystone-system}
+  #   spec: {selfSigned: {}}
+  #   EOF
+  issuerRef:
+    name: selfsigned
+    kind: Issuer
+  privateKey:
+    encoding: PKCS8
+    algorithm: ECDSA
+    size: 256
+  duration: 2160h    # 90 days
+  renewBefore: 360h  # 15 days before expiry
+---
+# Service the ValidatingWebhookConfiguration points at.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keystone-manager-webhook
+  namespace: keystone-system
+  labels:
+    app.kubernetes.io/name: keystone-manager
+    app.kubernetes.io/part-of: keystone
+spec:
+  selector:
+    app.kubernetes.io/name: keystone-manager
+  ports:
+    - name: https-webhook
+      port: 443
+      targetPort: 9443
+      protocol: TCP

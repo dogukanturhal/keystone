@@ -1,0 +1,66 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if .Values.rbac.create }}
+# Mirror of config/rbac/tenant_enroller_clusterrole.yaml. The kustomize
+# bundle and this helm chart MUST stay in lock-step on this object —
+# the SDK helpers in pkg/sdk/keystone/enroll.go (added in v0.1.43) hard-
+# code the cluster role name `keystone-tenant-enroller`, so consumers
+# of either install path expect the exact same name.
+#
+# Aggregated, narrow ClusterRole granted to product service accounts
+# (e.g. example-service, example-suite) so they can call the keystone SDK's
+# EnrollSchema / DeenrollSchema helpers at runtime.
+#
+# Scope is intentionally restricted to LogicalDatabase + DatabaseSchema.
+# SchemaDefinitions are NOT included — those are GitOps-authored
+# contracts. SchemaPolicies, MigrationBundles, MigrationExecutions
+# are NOT included — those are Keystone-internal pipeline objects.
+#
+# Bind via a RoleBinding (NOT ClusterRoleBinding) in the product's
+# namespace so the SDK's reach is namespace-scoped per product.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keystone-tenant-enroller
+  labels:
+    app.kubernetes.io/part-of: keystone
+    app.kubernetes.io/component: sdk-rbac
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ include "keystone-operator.chart" . }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["logicaldatabases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["logicaldatabases/status"]
+    verbs: ["get"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["databaseschemas"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["databaseschemas/status"]
+    verbs: ["get"]
+  # Read-only on SchemaDefinitions — required by WaitSchemaUpToDate
+  # (v0.1.47) which polls SD.Status.MatchedSchemas + Conditions[Ready]
+  # to confirm the SD-emitted MigrationBundle has applied. Read scope
+  # ONLY; SDs remain GitOps-authored contracts.
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["schemadefinitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["keystone.hexxlock.io"]
+    resources: ["schemadefinitions/status"]
+    verbs: ["get"]
+  # Secret read+write on the binding's namespace — required by
+  # LogicalDatabase.spec.ownerRolePasswordSecretRef (v0.1.54+) flow.
+  # SDK consumers create the password Secret in the same namespace as
+  # the LogicalDatabase; the keystone reconciler reads it on first
+  # create and on rotation. Bound via RoleBinding so secret-write is
+  # namespace-scoped, not cluster-wide. See config/rbac/tenant_
+  # enroller_clusterrole.yaml for the full design rationale.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{- end }}

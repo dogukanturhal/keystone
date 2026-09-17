@@ -1,0 +1,175 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keystone-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # Rolling upgrade with maxUnavailable: 0 lets leader election hand off
+  # cleanly — see docs/operator-hardening.md §9.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "keystone-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "keystone-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/part-of: keystone
+        app.kubernetes.io/component: operator
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+        # Force pod restart when the webhook cert rotates — the rustls
+        # policy-controller caches certs at startup
+        {{- if and .Values.webhook.enabled .Values.webhook.certManager.enabled }}
+        checksum/webhook-cert: {{ include "keystone-operator.webhookCertName" . | sha256sum | trunc 16 }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "keystone-operator.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: manager
+          image: {{ include "keystone-operator.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --start-manager
+            - --role={{ .Values.controller.role }}
+            - --system-namespace={{ .Values.systemNamespace }}
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --health-probe-bind-address=:8081
+            - --drift-check-interval={{ .Values.controller.driftCheckInterval }}
+            - --leader-elect={{ .Values.controller.leaderElect }}
+            - --leader-election-id={{ .Values.controller.leaderElectionID }}
+            - --leader-election-namespace={{ .Release.Namespace }}
+            {{- /*
+              Leader election timings are emitted ONLY when all three are set.
+              Keeping them absent by default means this chart stays compatible
+              with manager images that predate the flags — important because
+              the chart and the image roll out independently, and Go's flag
+              package aborts on an unknown flag, which would CrashLoopBackOff
+              the operator. Set all three together; the manager validates
+              retryPeriod < renewDeadline < leaseDuration.
+            */}}
+            {{- if and .Values.controller.leaderElection.leaseDuration .Values.controller.leaderElection.renewDeadline .Values.controller.leaderElection.retryPeriod }}
+            - --leader-elect-lease-duration={{ .Values.controller.leaderElection.leaseDuration }}
+            - --leader-elect-renew-deadline={{ .Values.controller.leaderElection.renewDeadline }}
+            - --leader-elect-retry-period={{ .Values.controller.leaderElection.retryPeriod }}
+            {{- end }}
+            {{- if .Values.controller.watchNamespaces }}
+            - --watch-namespaces={{ .Values.controller.watchNamespaces }}
+            {{- end }}
+            - --secure-metrics={{ .Values.metrics.secure }}
+            - --enable-webhooks={{ .Values.controller.enableWebhooks }}
+            - --enable-http2={{ .Values.controller.enableHTTP2 }}
+            - --enable-pprof={{ .Values.metrics.pprof.enabled | default false }}
+            - --enable-cr-ttl={{ .Values.controller.crTTL.enabled | default false }}
+            - --cr-ttl-check-interval={{ .Values.controller.crTTL.checkInterval | default "15m" }}
+            - --cr-ttl-retain-success={{ .Values.controller.crTTL.retainSuccess | default "24h" }}
+            - --cr-ttl-retain-failure={{ .Values.controller.crTTL.retainFailure | default "168h" }}
+            {{- if .Values.otel.endpoint }}
+            - --otel-endpoint={{ .Values.otel.endpoint }}
+            - --otel-insecure={{ .Values.otel.insecure }}
+            {{- end }}
+            {{- with .Values.controller.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- with .Values.controller.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            # /tmp must be writable for pprof dumps + envtest scratch even
+            # though the rootfs is read-only.
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.webhook.enabled }}
+            - name: webhook-cert
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+            {{- end }}
+            {{- with .Values.controller.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-cert
+          secret:
+            secretName: {{ include "keystone-operator.webhookSecretName" . }}
+            defaultMode: 420
+        {{- end }}
+        {{- with .Values.controller.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

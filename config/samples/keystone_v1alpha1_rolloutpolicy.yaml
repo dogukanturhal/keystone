@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample RolloutPolicy — the canonical canary → free → paid pipeline.
+# Bundles reference it via spec.rolloutPolicyRef: standard-tiered.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: standard-tiered
+spec:
+  stages:
+    - name: canary
+      # Pick schemas whose owning cluster has tier=canary. The legacy
+      # hub also operates in canary tier (see ClusterRegistration sample),
+      # so this stage hits the example/canary tenant first.
+      clusterTierSelector: [canary]
+      parallelism: 1
+      soakDuration: 5m
+      # No human approval needed to leave canary — the soak signals
+      # health on its own.
+      requireApproval: false
+      abortOnFailure: true
+
+    - name: free
+      clusterTierSelector: [free]
+      # Moderate parallelism: hit lots of free tenants quickly but still
+      # in batches so a bad migration is bounded.
+      parallelism: 10
+      soakDuration: 15m
+      requireApproval: false
+      abortOnFailure: true
+
+    - name: paid
+      clusterTierSelector: [paid]
+      # Conservative parallelism + explicit human approval. Required
+      # because paid tenants have stricter SLAs and the blast radius
+      # from a bad migration is highest.
+      parallelism: 3
+      soakDuration: 30m
+      requireApproval: true
+      abortOnFailure: true
+---
+# Companion ClusterRegistration: register a second logical cluster as
+# tier=free so the staged rollout has a non-canary target. In Phase 7
+# this is a label-only registration — no separate kubeconfig — Phase 8+
+# will split into a real workload cluster with its own keystone-agent.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: ClusterRegistration
+metadata:
+  name: prod-eu-west-1-free
+  labels:
+    keystone.hexxlock.io/role: free-tier-shadow
+spec:
+  displayName: "Production EU-TR-1a (free-tier shadow)"
+  tier: free
+  region: eu-west-1
+  dataResidency: eu
+  labels:
+    extensions-allowlist: "uuid-ossp,pgcrypto,pg_stat_statements"
+    cni: cilium
+    storage: rook-ceph
+    note: "label-only Phase 7 registration; same hardware as prod-eu-west-1-hub"

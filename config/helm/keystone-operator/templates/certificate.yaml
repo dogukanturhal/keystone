@@ -1,0 +1,34 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if and .Values.webhook.enabled .Values.webhook.certManager.enabled }}
+# cert-manager Certificate for the webhook TLS server. Rotated every
+# ~3 months; the ValidatingWebhookConfiguration consumes it via
+# cert-manager.io/inject-ca-from so rotations are seamless.
+#
+# PKCS#8 private key encoding is the HexxLock platform default — required
+# for Linkerd compatibility on any meshed namespace
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "keystone-operator.webhookCertName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "keystone-operator.webhookSecretName" . }}
+  duration: {{ .Values.webhook.certManager.duration }}
+  renewBefore: {{ .Values.webhook.certManager.renewBefore }}
+  privateKey:
+    algorithm: {{ .Values.webhook.certManager.privateKey.algorithm }}
+    size: {{ .Values.webhook.certManager.privateKey.size }}
+    encoding: {{ .Values.webhook.certManager.privateKey.encoding }}
+    rotationPolicy: {{ .Values.webhook.certManager.privateKey.rotationPolicy }}
+  dnsNames:
+    - {{ include "keystone-operator.webhookServiceName" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "keystone-operator.webhookServiceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: {{ .Values.webhook.certManager.issuerRef.kind }}
+    name: {{ .Values.webhook.certManager.issuerRef.name }}
+    {{- with .Values.webhook.certManager.issuerRef.group }}
+    group: {{ . }}
+    {{- end }}
+{{- end }}

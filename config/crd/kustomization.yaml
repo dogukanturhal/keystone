@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# CRD bundle. Consumed by the ArgoCD Application in the GitOps repository
+# (platform/keystone/crds-application.yaml) which points its source at this
+# directory so CRDs version with the operator code.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - bases/keystone.hexxlock.io_auditentries.yaml
+  - bases/keystone.hexxlock.io_auditlogs.yaml
+  - bases/keystone.hexxlock.io_clusterregistrations.yaml
+  - bases/keystone.hexxlock.io_databaseproviders.yaml
+  - bases/keystone.hexxlock.io_databaseschemas.yaml
+  - bases/keystone.hexxlock.io_driftreports.yaml
+  - bases/keystone.hexxlock.io_logicaldatabases.yaml
+  - bases/keystone.hexxlock.io_migrationbundles.yaml
+  - bases/keystone.hexxlock.io_migrationexecutions.yaml
+  - bases/keystone.hexxlock.io_migrationplans.yaml
+  - bases/keystone.hexxlock.io_productdefinitions.yaml
+  - bases/keystone.hexxlock.io_productinstances.yaml
+  - bases/keystone.hexxlock.io_rolloutpolicies.yaml
+  - bases/keystone.hexxlock.io_schemadefinitions.yaml
+  - bases/keystone.hexxlock.io_schemapolicies.yaml
+  - bases/keystone.hexxlock.io_schemasnapshots.yaml

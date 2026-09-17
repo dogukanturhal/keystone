@@ -1,0 +1,47 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+# Prometheus Operator ServiceMonitor. Relies on the monitoring.coreos.com
+# CRDs being present; skip this file by setting metrics.serviceMonitor.
+# enabled=false if your cluster runs plain Prometheus without the
+# Operator.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "keystone-operator.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.metrics.serviceMonitor.namespace }}
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  selector:
+    matchLabels:
+      {{- include "keystone-operator.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: https-metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        {{- if .Values.metrics.serviceMonitor.tlsCaSecretName }}
+        caFile: /etc/prometheus/secrets/{{ .Values.metrics.serviceMonitor.tlsCaSecretName }}/ca.crt
+        {{- else }}
+        # Accept the kube-apiserver-issued serving cert chain. When the
+        # metrics server uses cert-manager, set tlsCaSecretName to the
+        # secret holding ca.crt so Prometheus can verify.
+        insecureSkipVerify: true
+        {{- end }}
+        serverName: {{ include "keystone-operator.metricsServiceName" . }}.{{ .Release.Namespace }}.svc
+      {{- with .Values.metrics.serviceMonitor.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.metrics.serviceMonitor.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

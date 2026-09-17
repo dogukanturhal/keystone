@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample ProductInstance — one tenant subscribing to the product defined
+# in keystone_v1alpha1_productdefinition.yaml.
+#
+# `productRef` must name an existing ProductDefinition. `tenantID` is the
+# stable identifier substituted into that definition's nameTemplates, so
+# this instance yields databases named example_suite_<tenantID>; tenantSlug
+# is the human-readable form used in labels and events.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: ProductInstance
+metadata:
+  name: example-tenant-suite
+  namespace: keystone-system
+spec:
+  tenantID: 00000000-0000-0000-0000-000000000001
+  tenantSlug: example-tenant
+  productRef: example-suite
+  region: eu-west-1
+  deletionPolicy: Retain  # safety default — never auto-drop a tenant's data

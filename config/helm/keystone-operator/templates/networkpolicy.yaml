@@ -1,0 +1,109 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if .Values.networkPolicy.enabled }}
+# Manager NetworkPolicy — docs/operator-hardening.md §1.
+#
+# Ingress: webhook (from apiserver) + metrics (from Prometheus).
+# Egress:  kube-apiserver + declared DatabaseProvider hosts + optional
+#          OTLP collector + DNS.
+#
+# The DatabaseProvider egress is expressed as two user-supplied axes:
+# extraEgressCIDRs (IP literals for external / off-cluster PG) and
+# extraEgressNamespaceSelectors (for in-cluster PG like CNPG). Combine as
+# needed; leave both empty only for dev installs with no real databases.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "keystone-operator.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Admission webhook — the kube-apiserver dials the webhook Service.
+    {{- if .Values.webhook.enabled }}
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.webhook.port }}
+    {{- end }}
+    # Metrics scrape — Prometheus (any namespace; SAR authn/authz is the
+    # real trust boundary).
+    {{- if .Values.metrics.enabled }}
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.metrics.port }}
+    {{- end }}
+    # Health probes come from the kubelet on the node itself — match via
+    # a permissive ipBlock so kubelet on any node can reach port 8081.
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 8081
+  egress:
+    # kube-apiserver — the hard-to-enumerate one. Allow all to-apiserver
+    # traffic via the well-known port; CNI / cluster operator may further
+    # scope this via a higher-priority policy.
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    {{- if .Values.networkPolicy.allowDNS }}
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    # PostgreSQL egress (cluster-external).
+    {{- with .Values.networkPolicy.extraEgressCIDRs }}
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6432
+    {{- end }}
+    # PostgreSQL egress (in-cluster namespaces, e.g. CNPG).
+    {{- with .Values.networkPolicy.extraEgressNamespaceSelectors }}
+    - to:
+        {{- range . }}
+        - namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6432
+    {{- end }}
+    # OTLP exporter (optional).
+    {{- if .Values.otel.endpoint }}
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.otlpNamespaceSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    {{- end }}
+{{- end }}

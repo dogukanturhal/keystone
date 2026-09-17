@@ -1,0 +1,365 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: logicaldatabases.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: LogicalDatabase
+    listKind: LogicalDatabaseList
+    plural: logicaldatabases
+    shortNames:
+    - ldb
+    singular: logicaldatabase
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.name
+      name: Name
+      type: string
+    - jsonPath: .spec.clusterRef
+      name: Cluster
+      type: string
+    - jsonPath: .spec.ownerRole
+      name: Owner
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.sizeBytes
+      name: Size
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          LogicalDatabase declares a PostgreSQL database that should exist on a
+          referenced cluster. The controller is idempotent: declaring the same
+          database twice is harmless; deleting the resource (with finalizer) will
+          drop the database only if spec.deletionPolicy permits it (Phase 4+).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              LogicalDatabaseSpec describes one logical PostgreSQL database (a `CREATE
+              DATABASE` target). Multiple LogicalDatabases may live in the same
+              underlying cluster; the controller is responsible for opening admin
+              connections to the cluster, ensuring the DB exists with the requested
+              configuration, and creating the owner role.
+
+              LogicalDatabases are namespaced because a tenant or product team may own
+              the DB and operate on it through Keystone's RBAC. Cross-namespace access
+              is allowed only through SchemaPolicy.
+            properties:
+              clusterRef:
+                description: |-
+                  ClusterRef is the name of the ClusterRegistration this database
+                  belongs to from a workload-rollout perspective. Used by the
+                  RolloutController (Phase 7) and DriftController (Phase 5) to scope
+                  per-cluster operations. NOT used by the SchemaController for
+                  connectivity — that goes via ProviderRef.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              collation:
+                default: C
+                description: |-
+                  Collation overrides the default LC_COLLATE. Like Encoding, this is
+                  fixed at CREATE time.
+                maxLength: 64
+                type: string
+              connectionLimit:
+                default: -1
+                description: |-
+                  ConnectionLimit caps the maximum concurrent connections (PostgreSQL
+                  `CONNECTION LIMIT` clause). -1 means unlimited (PostgreSQL default).
+                format: int32
+                minimum: -1
+                type: integer
+              ctype:
+                default: C
+                description: Ctype overrides the default LC_CTYPE. Fixed at CREATE
+                  time.
+                maxLength: 64
+                type: string
+              deletionPolicy:
+                default: Retain
+                description: |-
+                  DeletionPolicy controls what happens to the underlying PostgreSQL
+                  database when the LogicalDatabase resource is deleted. Defaults to
+                  Retain — deleting a CR never drops production data. Operators must
+                  explicitly opt in to Delete for tear-down workflows.
+                enum:
+                - Retain
+                - Delete
+                type: string
+              encoding:
+                default: UTF8
+                description: |-
+                  Encoding overrides the default character encoding (UTF8). Setting
+                  this on an existing database is a no-op — encoding is fixed at
+                  CREATE time.
+                enum:
+                - UTF8
+                - SQL_ASCII
+                - LATIN1
+                type: string
+              extensions:
+                description: |-
+                  Extensions are PostgreSQL extensions to CREATE EXTENSION IF NOT
+                  EXISTS. Order is preserved. The admission webhook rejects any
+                  extension not present in the cluster's allow-list (declared on the
+                  ClusterRegistration's spec.labels).
+                items:
+                  type: string
+                maxItems: 32
+                type: array
+              name:
+                description: |-
+                  Name is the actual PostgreSQL database name. Distinct from
+                  metadata.name: PG identifiers commonly use underscores (e.g.
+                  example_suite) while Kubernetes resources prefer hyphens
+                  (hexxlock-erp). Required so this never has to be inferred.
+                maxLength: 63
+                pattern: ^[a-z_][a-z0-9_]*$
+                type: string
+              ownerRole:
+                description: |-
+                  OwnerRole is the PostgreSQL role that owns the database. The
+                  controller creates the role if absent and grants it CREATE on the
+                  DB. Required because creating a database with no clear owner is an
+                  operational landmine.
+                maxLength: 63
+                pattern: ^[a-z_][a-z0-9_]*$
+                type: string
+              ownerRolePasswordSecretRef:
+                description: |-
+                  OwnerRolePasswordSecretRef references a Kubernetes Secret containing
+                  the password the reconciler should set on OwnerRole when creating it
+                  (and when rotating it on subsequent reconciles where the Secret
+                  content changes).
+
+                  The Secret MUST exist in the SAME namespace as the LogicalDatabase
+                  resource. The reconciler reads spec.ownerRolePasswordSecretRef.name
+                  from that namespace and reads the value at spec.ownerRolePassword
+                  SecretRef.key. Cross-namespace references are intentionally
+                  disallowed — the LogicalDatabase namespace gates who can change the
+                  password.
+
+                  When unset, EnsureRole creates the role WITHOUT a password. The
+                  PostgreSQL admin can then assign one out-of-band (e.g. via Vault
+                  dynamic secrets engine, manual psql, or any other mechanism) — the
+                  pre-passwordSecretRef behavior. Backward-compatible: existing
+                  LogicalDatabases without this field reconcile identically to v0.1.53.
+
+                  # Standalone-product design note
+
+                  SecretKeySelector is a vanilla corev1 type — the same pattern used
+                  by cert-manager (Issuer.spec.vault.auth.appRole.secretRef),
+                  CloudNativePG (Cluster.spec.bootstrap.initdb.passwordSecret),
+                  Crunchy Postgres Operator (PostgresCluster.spec.users[].password.
+                  secretName), Zalando Postgres Operator (postgresql.spec.users) and
+                  many others. No vendor lock-in: any Secret-source operator
+                  (External Secrets, kubernetes-external-secrets, Vault Agent
+                  Injector, Reflector, plain kubectl-created Secrets) can populate
+                  the referenced Secret and Keystone reads it the same way.
+
+                  # Rotation
+
+                  On every reconcile the controller compares the password in the
+                  referenced Secret with what was last written to the role
+                  (cached in status.observedPasswordHash). On change, the
+                  controller issues ALTER ROLE … PASSWORD '<new>' to rotate the
+                  PostgreSQL password atomically. ExternalSecrets/Vault rotation
+                  flows therefore Just Work: rotate the source → ESO refreshes the
+                  Secret → next reconcile applies ALTER ROLE.
+                properties:
+                  key:
+                    description: The key of the secret to select from.  Must be a
+                      valid secret key.
+                    type: string
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  optional:
+                    description: Specify whether the Secret or its key must be defined
+                    type: boolean
+                required:
+                - key
+                type: object
+                x-kubernetes-map-type: atomic
+              providerRef:
+                description: |-
+                  ProviderRef is the name of the DatabaseProvider hosting this
+                  database. The SchemaController opens admin sessions against this
+                  provider to CREATE DATABASE / CREATE ROLE / CREATE EXTENSION. A
+                  LogicalDatabase belongs to exactly one provider; cross-provider
+                  replication is out of scope (use a ReplicationPolicy in Phase 6+).
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              trackingTableName:
+                default: schema_migrations
+                description: |-
+                  TrackingTableName is the table name Keystone writes migration
+                  bookkeeping into. Defaults to "schema_migrations" — the
+                  golang-migrate convention — which is the right choice on greenfield
+                  databases.
+
+                  Override when adopting Keystone on a database that already has a
+                  migrator managing its own `schema_migrations`. Falcon-ID is the
+                  canonical example: its existing table has `version INTEGER PK`
+                  while Keystone's runner uses `version TEXT PK`. Setting
+                  trackingTableName to "keystone_schema_migrations" lets both
+                  trackers co-exist without touching production history.
+                maxLength: 63
+                pattern: ^[a-z_][a-z0-9_]*$
+                type: string
+            required:
+            - clusterRef
+            - name
+            - ownerRole
+            - providerRef
+            type: object
+          status:
+            description: LogicalDatabaseStatus reports observed state.
+            properties:
+              conditions:
+                description: |-
+                  Conditions reports the current state. Ready, Available, Progressing
+                  and Degraded follow Kubernetes conventions; the controller may add
+                  more (e.g. ExtensionsInstalled).
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastReconcileTime:
+                description: |-
+                  LastReconcileTime is when the controller last successfully reconciled
+                  this resource. Used to detect stuck reconciliations.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              observedPasswordHash:
+                description: |-
+                  ObservedPasswordHash is the SHA-256 (hex) of the password the
+                  controller most recently applied to spec.ownerRole via CREATE ROLE
+                  or ALTER ROLE PASSWORD. Compared against the live password in the
+                  referenced spec.ownerRolePasswordSecretRef on each reconcile so
+                  rotation (Secret content change) triggers exactly one ALTER ROLE
+                  PASSWORD per change.
+
+                  Empty when spec.ownerRolePasswordSecretRef is unset, OR when the
+                  role was created with no password (legacy / out-of-band-password
+                  path).
+
+                  Stored as a hash, not the password itself, so leaking status never
+                  leaks credentials.
+                maxLength: 64
+                type: string
+              resolvedEndpoint:
+                description: |-
+                  ResolvedEndpoint is the host:port the controller resolved from the
+                  referenced ClusterRegistration. Surfaced in status so operators can
+                  confirm where the controller is actually connecting.
+                type: string
+              sizeBytes:
+                anyOf:
+                - type: integer
+                - type: string
+                description: |-
+                  SizeBytes is the on-disk size of the database, refreshed periodically
+                  by the SchemaController. Approximate (snapshot at last reconcile).
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,93 @@
+# CodeQL SAST workflow — GitHub mirror activation file
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# LOCATION NOTE: This file lives at services/keystone/.github/workflows/codeql.yml
+# inside the platform monorepo (GitLab canonical). When the GitHub mirror
+# github.com/hexxlock/keystone is created, copy this file to
+# .github/workflows/codeql.yml at the root of that mirror repository.
+#
+# This workflow covers the OpenSSF Scorecard SAST check, which requires
+# a recognised SAST tool (CodeQL qualifies) to run on every push to the
+# default branch and on pull requests.
+#
+# ACTIVATION CHECKLIST:
+#   1. Mirror github.com/hexxlock/keystone is live.
+#   2. GitHub Advanced Security (GHAS) is enabled. For public repos it is
+#      free. For private repos it requires a GHAS license.
+#   3. Code Scanning is enabled: Settings > Security > Code scanning.
+#   4. The GITHUB_TOKEN has "security-events: write" (set below).
+#   5. Pinned SHAs — resolve before activation:
+#      actions/checkout@v4      SHA: __REPLACE_ME__
+#      github/codeql-action/init@v3        SHA: __REPLACE_ME__
+#      github/codeql-action/autobuild@v3   SHA: __REPLACE_ME__
+#      github/codeql-action/analyze@v3     SHA: __REPLACE_ME__
+#      (fetch: https://github.com/github/codeql-action/releases)
+
+name: CodeQL SAST
+
+on:
+  # Scorecard requires SAST on push to default branch.
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+  # And on pull requests targeting the default branch.
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+  # Weekly schedule to catch newly-disclosed vulnerabilities in existing code.
+  schedule:
+    - cron: "15 5 * * 1"  # Monday 05:15 UTC
+
+permissions: read-all
+
+jobs:
+  codeql:
+    name: CodeQL Go analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout code
+        # Pin to commit SHA — replace tag placeholder before activation.
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Pin to the same Go version used in the CI configuration (GO_VERSION: "1.25").
+          go-version: "1.25"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          # Use the security-extended query suite for broader coverage.
+          # Maps to Scorecard SAST check requirement.
+          queries: security-extended
+
+      - name: Build (CodeQL autobuild)
+        uses: github/codeql-action/autobuild@v3
+        env:
+          # Keystone must build without go.work (self-contained module).
+          GOWORK: "off"
+
+      - name: Run CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-go
+          output: codeql-results.sarif
+          upload: true

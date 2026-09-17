@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample MigrationBundle using strategy=pgroll-expand-contract for a
+# zero-downtime column rename.
+#
+# Lifecycle:
+#  1. Apply this CR — controller creates MigrationExecution, runs Expand
+#     (ADD new column + COPY + INSTALL trigger).
+#  2. Deploy app revision that reads/writes the new column name.
+#  3. Verify telemetry / canary that no traffic uses the old name.
+#  4. Annotate the MigrationExecution to trigger Contract:
+#       kubectl annotate migrationexecution <name> -n keystone-system \
+#         keystone.hexxlock.io/complete=true
+#  5. Controller drops the trigger and the old column.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: MigrationBundle
+metadata:
+  name: crm-rename-lead-name
+  namespace: keystone-system
+spec:
+  version: v43-rename
+  strategy: pgroll-expand-contract
+  schemaSelector:
+    matchLabels:
+      module: crm
+  operations:
+    - kind: rename_column
+      table: leads
+      renameColumn:
+        from: name
+        to: full_name

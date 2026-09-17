@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample DatabaseProvider — registers the existing CNPG-managed PostgreSQL
+# cluster (example-pg per project memory project_cnpg_migration.md). The
+# admin Secret must live in keystone-system; cross-namespace refs are
+# rejected by the SchemaController.
+#
+# In production the Secret is projected from Vault by ExternalSecrets.
+# For local dev, kubectl create secret generic example-pg-admin
+#   --from-literal=username=postgres --from-literal=password=…
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: DatabaseProvider
+metadata:
+  name: example-pg
+spec:
+  engine: postgresql
+  host: example-pg-rw.cnpg-system.svc.cluster.local
+  port: 5432
+  maintenanceDatabase: postgres
+  sslMode: verify-full
+  adminCredentialsRef:
+    secretName: example-pg-admin
+    usernameKey: username
+    passwordKey: password
+  poolMaxConns: 4

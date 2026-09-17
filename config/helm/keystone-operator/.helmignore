@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Files excluded from the packaged chart archive.
+.DS_Store
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+*.bak
+*.tmp
+*.orig
+*.log
+*.tgz
+.github/
+.gitlab/
+OWNERS
+OWNERS_ALIASES
+# Chart authoring-only (developer-local artefacts)
+tests/
+ci/
+docs/
+# Keystone-internal supplemental docs — users get README.md, not these
+CHANGELOG.md
+CONTRIBUTING.md

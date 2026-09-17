@@ -1,0 +1,68 @@
+# Trivy exception list — keystone
+#
+# Every entry here is a CVE in a THIRD-PARTY BINARY we download, not in
+# code this repo builds. kubectl and cosign are shipped as prebuilt Go
+# binaries in keystone-tools; their dependencies are vendored at upstream
+# build time, so a fix requires upstream to cut a release rebuilt against
+# the patched library. Bumping our own go.mod cannot move them, and
+# neither can `--ignore-unfixed`: Trivy considers these "fixed" because a
+# fixed version of the *library* exists, even though no rebuilt *binary*
+# does.
+#
+# Why an exception list rather than allow_failure:
+#   vuln-scan-tools-image was allow_failure:true and had been failing
+#   since 2026-06-14 — seven weeks of a red gate nobody could see, which
+#   is indistinguishable from having no gate. Listing the known-unfixable
+#   findings makes the job green, so the NEXT new CVE turns it red and
+#   means something.
+#
+# Every entry carries expired_at. On that date Trivy stops honouring the
+# entry and the job goes red again, forcing a re-check of whether
+# upstream has shipped a rebuild. Exceptions that never expire become
+# permanent blindness.
+#
+# Review procedure when one expires:
+#   1. Check the newest kubectl / cosign release.
+#   2. `go version -m <binary> | grep <dep>` to read what it actually
+#      vendored — release notes are not evidence.
+#   3. If fixed, bump the ARG in Dockerfile.tools and delete the entry.
+#   4. If not, extend expired_at with the date checked.
+
+vulnerabilities:
+  # --- kubectl v1.36.3 (vendors golang.org/x/net v0.49.0; fixed in 0.55.0)
+  - id: CVE-2026-56852
+    paths:
+      - usr/local/bin/kubectl
+      - usr/local/bin/cosign
+    statement: >-
+      golang.org/x/text vendored by upstream cosign. Re-checked 2026-09-10
+      per the procedure above: kubectl v1.37.0 now vendors x/text v0.40.0
+      and is CLEAR, so the kubectl half of this entry is gone. cosign
+      v3.1.3 -- the newest release -- still vendors v0.38.0, below the
+      >= 0.39.0 that carries the fix. Verified with `go version -m` on the
+      actual v3.1.3 binary, not from release notes.
+    expired_at: 2026-11-15
+
+  # --- cosign v3.1.2 (go1.26.4; CVE-2026-39822 fixed in 1.26.5)
+  - id: CVE-2026-39822
+    paths:
+      - usr/local/bin/cosign
+    statement: >-
+      Go stdlib in the upstream cosign binary; the fix lands in go1.26.5.
+      Re-checked 2026-09-10: cosign v3.1.3 -- the newest release -- is
+      STILL built on go1.26.4, so upgrading gains nothing here. Verified
+      by `go version -m` on the v3.1.3 binary. Clears when sigstore ships
+      a release built on go1.26.5+.
+    expired_at: 2026-11-15
+  # --- cosign v3.1.2 (vendors google.golang.org/grpc v1.82.0; fixed in 1.82.1)
+  - id: GHSA-hrxh-6v49-42gf
+    paths:
+      - usr/local/bin/cosign
+    statement: >-
+      google.golang.org/grpc vendored by upstream cosign; fix at 1.82.1.
+      Re-checked 2026-09-10: cosign v3.1.3 still vendors grpc v1.82.0, one
+      patch short. Verified by `go version -m` on the v3.1.3 binary. cosign
+      runs here only to verify signatures over HTTPS to Harbor; it does not
+      serve gRPC, and this class of CVE requires a server built with
+      xds.NewGRPCServer().
+    expired_at: 2026-11-15

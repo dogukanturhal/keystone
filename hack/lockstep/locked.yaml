@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Lockstep manifest — resources whose names are hardcoded in the
+# Keystone SDK (pkg/sdk/keystone/) or in external consumer manifests
+# (RoleBindings authored in the GitOps repository, etc.). Both the helm
+# chart AND the kustomize bundle MUST render each entry verbatim;
+# divergence between install paths breaks SDK callers using one path
+# but not the other.
+#
+# History: keystone v0.1.43 added pkg/sdk/keystone/enroll.go +
+# config/rbac/tenant_enroller_clusterrole.yaml but NOT the equivalent
+# helm template. Every chart-based install (every Argo Application in
+# this org) silently shipped the SDK code without its supporting
+# RBAC; example-service phase-2b MR3 surfaced it as "RoleBinding refers to
+# missing ClusterRole" at apply time. v0.1.44 fixed it; this manifest
+# exists to make the same gap impossible to merge again.
+#
+# Add a new entry whenever the SDK or a documented external consumer
+# starts hardcoding a new resource name. Removing entries requires
+# verifying no consumer hardcodes the name (grep + RPC consumers + docs).
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRole
+  name: keystone-tenant-enroller

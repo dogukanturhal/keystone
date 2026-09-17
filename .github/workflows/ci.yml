@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # Read the toolchain from go.mod so CI cannot drift from the
+          # version the module declares.
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./internal/... ./cmd/... -count=1
+
+      # api/ is a separate module with its own go.mod, so `./...` from the
+      # repository root does not reach it.
+      - name: API module tests
+        working-directory: api
+        run: go test ./... -count=1
+
+      - name: gofmt (new and changed files only)
+        run: |
+          # The tree carries pre-existing formatting drift from a period
+          # when the linter could not run. Gate on files this change
+          # touches rather than failing the whole build on history.
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "not a pull request — skipping"; exit 0
+          fi
+          changed=$(git diff --name-only --diff-filter=ACM "$base" HEAD -- '*.go' || true)
+          [ -z "$changed" ] && { echo "no Go files changed"; exit 0; }
+          bad=$(gofmt -l $changed)
+          if [ -n "$bad" ]; then
+            echo "these changed files are not gofmt-clean:"; echo "$bad"; exit 1
+          fi
+
+  generated:
+    name: generated artifacts are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Regenerate, then diff. Checking `git diff` alone would only catch
+      # an uncommitted regeneration, never one that was skipped.
+      - name: Regenerate CRDs and RBAC
+        run: make generate
+
+      - name: Regenerate API reference
+        run: make api-reference
+
+      - name: Fail if anything changed
+        run: |
+          if ! git diff --quiet; then
+            echo "generated artifacts are out of date — run 'make generate api-reference' and commit:"
+            git --no-pager diff --stat
+            git --no-pager diff | head -200
+            exit 1
+          fi
+          echo "generated artifacts are current"

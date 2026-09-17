@@ -1,0 +1,324 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Default values for keystone-operator.
+#
+# This file carries enterprise-grade defaults: two replicas with leader
+# election, metrics + webhook TLS via cert-manager, NetworkPolicy enabled,
+# PDB enabled, restricted PodSecurityContext.
+#
+# NEVER put database admin credentials here — those come from Secrets the
+# user manages and references from DatabaseProvider CRs (see docs/operator-
+# hardening.md §2 "Admin credentials").
+
+# -- Namespace Keystone reads Secrets from. The controller rejects cross-
+# namespace Secret references (see ADR 0010). Set this to match the
+# release namespace unless you are deliberately sharing a single Secret
+# cache across multiple installations.
+systemNamespace: keystone-system
+
+# -- Number of manager replicas. Leader election keeps only one active at
+# a time; the others are warm standbys that take over on pod loss.
+# Use >=2 in production (tier-1 availability); 1 is acceptable for dev.
+replicaCount: 2
+
+image:
+  repository: ghcr.io/dogukanturhal/keystone-manager
+  # -- Image tag. Defaults to Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+  # -- Image pull secrets, e.g. [{ name: harbor-creds }].
+  pullSecrets: []
+
+# -- Fully-qualified name override. When empty the chart uses the release
+# name. Keep empty unless you need multiple installations in one
+# namespace (rare; leader election elects a single leader per
+# --leader-election-id, so multi-install requires overriding that too).
+fullnameOverride: ""
+nameOverride: ""
+
+# -- Extra labels to attach to every rendered object.
+commonLabels: {}
+
+# -- Extra annotations to attach to every rendered object.
+commonAnnotations: {}
+
+controller:
+  # -- Enable leader election so only one replica reconciles at a time.
+  # Disabling this with replicaCount > 1 causes double-reconcile races
+  # and is unsupported.
+  leaderElect: true
+  # -- Leader election lock identifier. Must be unique per installation
+  # if multiple operators share a namespace (rare — prefer a dedicated
+  # namespace per installation).
+  leaderElectionID: keystone-manager.keystone.hexxlock.io
+  # -- Leader election timings. Empty by default, which leaves
+  # controller-runtime's defaults in place (15s / 10s / 2s) and emits no
+  # flags at all — required for compatibility with manager images built
+  # before these flags existed.
+  #
+  # Raise these on clusters whose API server can stall briefly. The case
+  # that motivated them: a single-member etcd, where `etcdctl defrag`
+  # blocks the entire API server because no quorum peer can serve reads
+  # during the rewrite. Any stall longer than renewDeadline makes the
+  # manager exit with "leader election lost".
+  #
+  # Suggested values for that case are OpenShift library-go's production
+  # defaults, documented to tolerate ~60s of kube-apiserver disruption
+  # without restarting pods:
+  #   leaseDuration: 137s
+  #   renewDeadline: 107s   # 137-107 = 30s clock-skew tolerance
+  #   retryPeriod:    26s   # 107/26  = ~4 attempts before losing the lease
+  #
+  # Set all three together or none; the manager rejects a partial set and
+  # enforces retryPeriod < renewDeadline < leaseDuration. With
+  # replicaCount 1 the cost of a longer lease is negligible, since leader
+  # election only guards split-brain during a rolling update.
+  leaderElection:
+    leaseDuration: ""
+    renewDeadline: ""
+    retryPeriod: ""
+  # -- Role this manager plays in the hub-spoke topology. One of:
+  # "hub" (watches spoke ClusterRegistrations and federates reconcile)
+  # or "spoke" (receives federation from a hub).
+  role: hub
+  # -- Comma-separated list of namespaces to watch. Empty = cluster-wide.
+  # Scope down in multi-tenant clusters where the operator should not
+  # see every namespace.
+  watchNamespaces: ""
+  # -- How often the DriftController re-inspects every schema.
+  # See docs/operator-hardening.md §8 for tuning signals.
+  driftCheckInterval: 1h
+  # -- CR-TTL controller — garbage-collects terminal MigrationBundle
+  # and MigrationExecution CRs whose age exceeds the per-SD or
+  # operator-wide retention window.
+  #
+  # Off by default for first release. The 2026-05-08 etcd-bloat
+  # post-mortem prescribed soak-then-flip after one week of
+  # dual-replica observability — flip per cluster after confirming
+  # `keystone_cr_ttl_pass_duration_seconds{outcome="disabled"}` is
+  # ticking and the new keystone_cr_ttl_* metric series have non-empty
+  # samples in Prometheus.
+  crTTL:
+    enabled: false
+    # -- Loop cadence. Shorter values keep GC closer to real-time at
+    # the cost of API quota; 15m is the recommended default for
+    # clusters with 30-min SD reconcile cadence.
+    checkInterval: 15m
+    # -- Operator-wide default retainSuccessFor when the owning
+    # SchemaDefinition does not pin spec.cleanup.retainSuccessFor.
+    # Per-SD overrides take precedence.
+    retainSuccess: 24h
+    # -- Operator-wide default retainFailureFor when the owning
+    # SchemaDefinition does not pin spec.cleanup.retainFailureFor.
+    # Per-SD overrides take precedence.
+    retainFailure: 168h
+  # -- Enable the admission webhook server. Disable only for local
+  # development without cert-manager.
+  enableWebhooks: true
+  # -- Enable HTTP/2 on the metrics + webhook endpoints. Left off by
+  # default because HTTP/1.1 is sufficient and avoids the CVE-2023-44487
+  # rapid-reset footprint.
+  enableHTTP2: false
+  # -- Extra arguments appended to the manager command line.
+  extraArgs: []
+  # -- Extra environment variables injected into the manager container.
+  extraEnv: []
+  # -- Extra volumes mounted on the manager Deployment.
+  extraVolumes: []
+  # -- Extra volumeMounts on the manager container.
+  extraVolumeMounts: []
+
+# -- Resource requests/limits. Values match docs/operator-hardening.md §3.
+# Scale memory up when reconciling hundreds of providers (pool cache is
+# the dominant consumer).
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1
+    memory: 512Mi
+
+# -- Pod-level securityContext. Matches Kubernetes restricted PSS.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level securityContext. Matches docs/operator-hardening.md §3.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Node selection + scheduling.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+# -- Termination grace period. Leader election hand-off needs time to
+# complete; keep >=30s.
+terminationGracePeriodSeconds: 30
+
+# -- Probe configuration. Paths come from the manager's healthz/readyz
+# HTTP handlers; change only if you know what you're doing.
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: health
+  initialDelaySeconds: 15
+  periodSeconds: 20
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+metrics:
+  # -- Enable the Prometheus metrics endpoint (TLS, SubjectAccessReview-
+  # authorised). See ADR 0004 for why kube-rbac-proxy is NOT used.
+  enabled: true
+  # -- Expose metrics over TLS with kube-apiserver SAR auth. Keep on.
+  secure: true
+  port: 8443
+  service:
+    type: ClusterIP
+    port: 8443
+    annotations: {}
+  serviceMonitor:
+    # -- Create a Prometheus Operator ServiceMonitor. Requires the
+    # monitoring.coreos.com CRD to be installed.
+    enabled: false
+    namespace: ""
+    interval: 5m
+    scrapeTimeout: 30s
+    labels: {}
+    # -- When true, use the cert-manager-issued CA to verify the metrics
+    # endpoint. Matches the webhook CA to avoid a second Certificate.
+    tlsCaSecretName: ""
+    relabelings: []
+    metricRelabelings: []
+  prometheusRule:
+    # -- Create a Prometheus Operator PrometheusRule with the ADR 0014
+    # multi-window burn-rate alerts.
+    enabled: false
+    namespace: ""
+    labels: {}
+    # -- Reconcile-success SLO objective (fraction, 0..1). ADR 0014: 99.5%.
+    reconcileSuccessObjective: 0.995
+    # -- MigrationExecution apply latency objective (seconds, p99).
+    migrationApplyP99Seconds: 30
+  pprof:
+    # -- Expose Go runtime profiling endpoints (/debug/pprof/*) on the
+    # metrics server. Inherits the same TLS + TokenReview +
+    # SubjectAccessReview authn/authz as /metrics — a caller still needs
+    # a token whose RBAC includes nonResourceURLs: ["/debug/pprof/*"].
+    # See the keystone-pprof-reader ClusterRole rendered below; bind it
+    # to a debugging ServiceAccount only for the duration of an
+    # investigation, then unbind. Off by default per ADR 0024 §5
+    # (off-by-default for runtime introspection in production).
+    enabled: false
+    # -- Render a keystone-pprof-reader ClusterRole granting
+    # `get` on nonResourceURLs ["/debug/pprof", "/debug/pprof/*"]. Off
+    # automatically when pprof.enabled=false. Operators bind the role
+    # to a SA with `kubectl create clusterrolebinding`; never auto-
+    # bound, principle of least privilege.
+    renderReaderClusterRole: true
+
+webhook:
+  # -- Deploy the ValidatingWebhookConfiguration + webhook Service.
+  enabled: true
+  port: 9443
+  service:
+    type: ClusterIP
+    port: 443
+    targetPort: 9443
+    annotations: {}
+  # -- Admission failure policy. Fail blocks writes when the webhook is
+  # down — safe for correctness, risky for availability. See docs/
+  # operator-hardening.md §11: Phase 12 addresses the availability side.
+  failurePolicy: Fail
+  certManager:
+    # -- Issue the webhook serving certificate via cert-manager.
+    enabled: true
+    # -- Issuer reference. kind is "Issuer" (namespaced) or
+    # "ClusterIssuer" (cluster-scoped).
+    issuerRef:
+      kind: Issuer
+      name: selfsigned
+      # group is optional; cert-manager defaults to cert-manager.io.
+      group: ""
+    # -- Certificate duration (RFC3339 duration). 90d recommended per
+    # docs/operator-hardening.md §2.
+    duration: 2160h
+    # -- Renew before expiry.
+    renewBefore: 360h
+    # -- Private key algorithm + encoding. PKCS8 is required for Linkerd
+    # compatibility (Linkerd requires PKCS#8-encoded keys).
+    privateKey:
+      algorithm: ECDSA
+      size: 256
+      encoding: PKCS8
+      rotationPolicy: Always
+
+serviceAccount:
+  # -- Create the ServiceAccount. Disable only when you manage RBAC out
+  # of band (rare).
+  create: true
+  # -- Annotations on the ServiceAccount (e.g. workload identity).
+  annotations: {}
+  # -- ServiceAccount name override.
+  name: ""
+
+rbac:
+  # -- Create the ClusterRole + ClusterRoleBinding.
+  create: true
+
+networkPolicy:
+  # -- Create the manager pod NetworkPolicy. See docs/operator-hardening.md
+  # §1 for the full rationale.
+  enabled: true
+  # -- Additional egress CIDRs. Keystone must egress to every
+  # DatabaseProvider host it manages; list the PG cluster CIDRs here
+  # (IP-literal), or rely on namespace-scoped egress rules for
+  # cluster-internal PostgreSQL.
+  extraEgressCIDRs: []
+  # -- Additional egress namespaceSelectors (for in-cluster PostgreSQL).
+  extraEgressNamespaceSelectors: []
+  # -- Allow DNS egress. Required unless you inject dnsConfig.
+  allowDNS: true
+  # -- Allow egress to the OTLP collector (when controller.otelEndpoint
+  # is set). Tune to your observability platform's namespace.
+  otlpNamespaceSelector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+
+podDisruptionBudget:
+  # -- Create a PodDisruptionBudget. Only rendered when replicaCount >= 2.
+  enabled: true
+  minAvailable: 1
+  maxUnavailable: ""
+
+# -- Observability (OpenTelemetry tracing). Leave endpoint empty to
+# disable OTLP export.
+otel:
+  endpoint: ""
+  insecure: false
+
+# -- Extra pod annotations (e.g. Linkerd inject, Vault agent inject).
+podAnnotations: {}
+
+# -- Extra pod labels.
+podLabels: {}

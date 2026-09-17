@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sample ProductDefinition — a fictional multi-tenant SaaS product.
+#
+# A ProductDefinition is the template: it declares the databases and
+# schemas every tenant of this product needs. A ProductInstance (see
+# keystone_v1alpha1_productinstance.yaml) binds one tenant to it, and the
+# TenancyController materialises a LogicalDatabase per `databases[]` entry
+# and a DatabaseSchema per `schemas[]` entry.
+#
+# `{{tenantID}}` is substituted per instance, so each tenant gets its own
+# database names from the same definition.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: ProductDefinition
+metadata:
+  name: example-suite
+spec:
+  slug: example-suite
+  displayName: "Example Suite"
+  defaultIsolation: bridge
+  databases:
+    - key: core
+      nameTemplate: "example_suite_{{tenantID}}"
+      providerRef: example-pg
+      extensions:
+        - uuid-ossp
+        - pgcrypto
+        - pg_stat_statements
+      schemas:
+        - key: catalog
+          nameTemplate: catalog
+        - key: orders
+          nameTemplate: orders
+        - key: reference_data
+          nameTemplate: reference_data
+    - key: financials
+      nameTemplate: "example_suite_financials_{{tenantID}}"
+      providerRef: example-pg
+      # `isolation` is deliberately omitted. The field passes CRD validation
+      # but no controller reads it: every database is provisioned as bridge
+      # (shared database, schema-per-tenant). Declaring `silo` here would
+      # advertise a per-tenant-database guarantee Keystone does not currently
+      # provide — a dangerous thing to imply on a payments surface. Admission
+      # now rejects it outright; see the "Isolation modes" warning in
+      # README.md.
+      extensions:
+        - uuid-ossp
+        - pgcrypto
+      schemas:
+        - key: payments
+          nameTemplate: payments
+        - key: billing
+          nameTemplate: billing
+  apiRoutes:
+    - path: /api/v1/example-suite/catalog
+      upstreamService: example-suite-catalog
+      upstreamPort: 8080
+    - path: /api/v1/example-suite/billing
+      upstreamService: example-suite-billing
+      upstreamPort: 8080
+  lifecycleHooks:
+    # Called when a ProductInstance reaches Activated. The receiving
+    # service verifies the HMAC signature using the shared secret named
+    # by signingSecretRef.
+    - on: Activated
+      url: https://identity.example-system.svc.cluster.local/api/v1/lifecycle/activated
+      signingSecretRef: example-lifecycle-hmac

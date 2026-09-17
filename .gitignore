@@ -1,0 +1,14 @@
+bin/
+vendor/
+cover.out
+cover.html
+*.test
+*.out
+.envrc
+.vscode/
+.idea/
+/manager
+
+# B-12 build artifacts (binaries should never be committed)
+/keystoneadm
+/keystonectl

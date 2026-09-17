@@ -1,0 +1,1030 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: migrationbundles.keystone.hexxlock.io
+spec:
+  group: keystone.hexxlock.io
+  names:
+    kind: MigrationBundle
+    listKind: MigrationBundleList
+    plural: migrationbundles
+    shortNames:
+    - mb
+    - bundle
+    singular: migrationbundle
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.version
+      name: Version
+      type: string
+    - jsonPath: .spec.strategy
+      name: Strategy
+      type: string
+    - jsonPath: .status.matchedSchemas
+      name: Matched
+      type: integer
+    - jsonPath: .status.appliedSchemas
+      name: Applied
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          MigrationBundle declares a versioned set of SQL migrations. The
+          MigrationController reads it, generates per-target MigrationPlans,
+          then per-target MigrationExecutions.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              MigrationBundleSpec describes a versioned set of SQL migrations that
+              the controller should apply to one or more target schemas.
+
+              The bundle is immutable in spirit: once a Version is applied, it is
+              recorded in the target's schema_migrations table and the same Version
+              must never carry different SQL. The admission webhook enforces this by
+              computing a content hash and rejecting changes that try to overwrite
+              an applied version.
+            properties:
+              approval:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Approval is metadata the admission webhook validates against
+                  SchemaPolicy.spec.requireApproval. Each key matches a
+                  requireApproval entry; the value MUST be a base64-encoded
+                  signature from a CI job that ran in a CODEOWNERS-approved MR.
+                type: object
+              autoRollback:
+                default: false
+                description: |-
+                  AutoRollback, when true and DownSource is present, causes a
+                  Failed MigrationExecution to automatically transition to
+                  RollingBack. The controller resolves the DownSource and applies
+                  it to undo the forward migration. If the rollback itself fails,
+                  the execution transitions to RollbackFailed (manual intervention
+                  required).
+
+                  Default false — operators must explicitly opt in to automatic
+                  rollback. Forward-fix is still the recommended approach for most
+                  migration failures.
+                type: boolean
+              downSource:
+                description: |-
+                  DownSource is the optional rollback counterpart to Source. When
+                  provided, the controller resolves it the same way as Source
+                  (ConfigMap or OCI) and stores the resulting SQL in
+                  MigrationExecution.status.reversalStatements. If AutoRollback is
+                  also true, a Failed execution automatically transitions to
+                  RollingBack and applies the down source.
+
+                  Convention: down files use *.down.sql pattern.
+                properties:
+                  configMapRef:
+                    description: |-
+                      ConfigMapRef is required when Type=ConfigMap. Lookup is in the
+                      same namespace as the MigrationBundle.
+                    properties:
+                      filePattern:
+                        default: '*.up.sql'
+                        description: |-
+                          FilePattern filters which keys are treated as SQL files. Defaults
+                          to `*.up.sql`.
+                        maxLength: 64
+                        type: string
+                      name:
+                        description: Name of the ConfigMap.
+                        maxLength: 253
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  ociArtifactRef:
+                    description: |-
+                      OCIArtifactRef is required when Type=OCIArtifact. Points to an
+                      OCI artifact in a registry (e.g., Harbor). The artifact's layers
+                      contain SQL migration files. Credentials are resolved from an
+                      imagePullSecret in the bundle's namespace.
+                    properties:
+                      digest:
+                        description: |-
+                          Digest is the OCI manifest digest (e.g., sha256:abc123...).
+                          Preferred over Tag for immutable references. When set, Tag is
+                          ignored.
+                        maxLength: 128
+                        pattern: ^(sha256:[0-9a-f]{64})?$
+                        type: string
+                      filePattern:
+                        default: '*.up.sql'
+                        description: |-
+                          FilePattern filters which files from the artifact are treated
+                          as SQL migrations. Defaults to "*.up.sql".
+                        maxLength: 64
+                        type: string
+                      plainHTTP:
+                        description: |-
+                          PlainHTTP allows pulling from registries without TLS. Default
+                          false. Only set to true for development registries.
+                        type: boolean
+                      pullSecretRef:
+                        description: |-
+                          PullSecretRef names the Secret containing OCI registry
+                          credentials. The Secret must have .dockerconfigjson data
+                          (type kubernetes.io/dockerconfigjson) or plain username/password
+                          keys. Looked up in the MigrationBundle's namespace.
+                        maxLength: 253
+                        type: string
+                      repository:
+                        description: |-
+                          Repository is the full OCI reference without the tag/digest,
+                          e.g., "ghcr.io/dogukanturhal/migrations/billing".
+                        maxLength: 512
+                        type: string
+                      tag:
+                        description: |-
+                          Tag is the OCI tag to pull. Mutually exclusive with Digest.
+                          When both are empty, defaults to "latest".
+                        maxLength: 128
+                        type: string
+                    required:
+                    - repository
+                    type: object
+                  type:
+                    description: Type discriminates the source layer.
+                    enum:
+                    - ConfigMap
+                    - OCIArtifact
+                    - Git
+                    type: string
+                required:
+                - type
+                type: object
+              executionMode:
+                default: Apply
+                description: |-
+                  ExecutionMode selects between executing the bundle's SQL (Apply,
+                  default) and recording it as already-applied without execution
+                  (RecordOnly — the adoption-baseline path; see the ExecutionMode
+                  type docs). Immutable once set: switching a shipped bundle
+                  between modes would rewrite the meaning of its tracking-table
+                  row. Requires strategy=versioned and autoRollback=false
+                  (enforced at admission).
+                enum:
+                - Apply
+                - RecordOnly
+                type: string
+              maxConcurrentExecutions:
+                default: 0
+                description: |-
+                  MaxConcurrentExecutions caps how many MigrationExecutions the
+                  bundle fans out in parallel when rolloutPolicyRef is unset
+                  (non-staged path). Staged bundles ignore this field and use
+                  RolloutPolicy.stages[].parallelism instead.
+
+                  Default 0 means unlimited — every matched schema gets an
+                  Execution on the first reconcile tick, preserving pre-B2
+                  behaviour. Non-zero values throttle the fanout so reconcile
+                  creates at most N Executions per tick and schedules the rest
+                  on subsequent ticks as in-flight Executions complete.
+                format: int32
+                maximum: 256
+                minimum: 0
+                type: integer
+              operations:
+                description: |-
+                  Operations declares pgroll-style expand/contract operations.
+                  Required for strategy=pgroll-expand-contract. Mutually exclusive
+                  with Source. The MigrationController applies operations in array
+                  order during Expand phase, then in REVERSE order during Contract
+                  phase (so e.g. a constraint added in op[0] is validated before
+                  the column it depends on is dropped in op[1]'s contract).
+                items:
+                  description: |-
+                    MigrationOperation is one declarative pgroll-style operation. The
+                    MigrationBundle authoring contract is "exactly one operation per
+                    MigrationBundle" so plans + status + Argo CD diffs stay readable.
+                    Multi-op bundles are deferred to Phase 6.1.
+                  properties:
+                    addColumn:
+                      description: AddColumn is populated when Kind=add_column.
+                      properties:
+                        default:
+                          description: |-
+                            Default is the column DEFAULT clause. Applied at column creation
+                            time, so existing rows get the default. Empty = no default.
+                          maxLength: 512
+                          type: string
+                        enforceNotNullInContract:
+                          description: |-
+                            EnforceNotNullInContract — when true and Nullable is true, the
+                            Contract phase issues SET NOT NULL after the operator confirms
+                            backfill via the complete annotation. Default false.
+                          type: boolean
+                        name:
+                          description: Name of the new column.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                        nullable:
+                          default: true
+                          description: |-
+                            Nullable controls whether the column accepts NULL. Default true
+                            to keep the Expand phase non-blocking; flip to false in Contract
+                            phase only after backfill is confirmed.
+                          type: boolean
+                        type:
+                          description: |-
+                            Type is the PostgreSQL type (TEXT, INTEGER, NUMERIC(10,2), …).
+                            Validated only at API level by length; controller hands it through
+                            after identifier-style sanity checks (no semicolons or quotes).
+                          maxLength: 128
+                          type: string
+                      required:
+                      - name
+                      - type
+                      type: object
+                    addConstraint:
+                      description: AddConstraint is populated when Kind=add_constraint.
+                      properties:
+                        definition:
+                          description: |-
+                            Definition is the constraint body inserted between CONSTRAINT
+                            and NOT VALID. For check: the predicate, e.g. "(score >= 0 AND
+                            score <= 100)". For foreign_key: the full FK clause, e.g.
+                            "FOREIGN KEY (lead_id) REFERENCES leads(id)".
+                          maxLength: 2048
+                          type: string
+                        name:
+                          description: Name of the constraint.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                        type:
+                          description: Type discriminates the constraint shape.
+                          enum:
+                          - check
+                          - foreign_key
+                          type: string
+                      required:
+                      - definition
+                      - name
+                      - type
+                      type: object
+                    alterColumnType:
+                      description: AlterColumnType is populated when Kind=alter_column_type.
+                      properties:
+                        castExpression:
+                          description: |-
+                            CastExpression is the SQL fragment used to convert the existing
+                            value to NewType. Default: "<column>::<newType>" (PostgreSQL's
+                            implicit cast). Specify a custom expression for non-trivial
+                            conversions, e.g. "to_jsonb(<column>)".
+                          maxLength: 512
+                          type: string
+                        column:
+                          description: Column to retype.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                        newType:
+                          description: |-
+                            NewType is the target PostgreSQL type. Same charset restrictions
+                            as AddColumnOp.Type.
+                          maxLength: 128
+                          type: string
+                      required:
+                      - column
+                      - newType
+                      type: object
+                    dropColumn:
+                      description: DropColumn is populated when Kind=drop_column.
+                      properties:
+                        name:
+                          description: Name of the column to drop.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    dropNotNull:
+                      description: DropNotNull is populated when Kind=drop_not_null.
+                      properties:
+                        column:
+                          description: Column is the name of the column to transition
+                            to NULLABLE.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                      required:
+                      - column
+                      type: object
+                    kind:
+                      description: Kind selects which sub-spec the controller reads.
+                      enum:
+                      - add_column
+                      - drop_column
+                      - rename_column
+                      - add_constraint
+                      - alter_column_type
+                      - set_not_null
+                      - drop_not_null
+                      type: string
+                    renameColumn:
+                      description: RenameColumn is populated when Kind=rename_column.
+                      properties:
+                        from:
+                          description: From is the existing column name.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                        to:
+                          description: To is the new column name.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                      required:
+                      - from
+                      - to
+                      type: object
+                    setNotNull:
+                      description: SetNotNull is populated when Kind=set_not_null.
+                      properties:
+                        column:
+                          description: |-
+                            Column is the name of the column to transition to NOT NULL. The
+                            column must already exist and must be nullable; admission
+                            enforces neither — the engine errors with a clear diagnostic.
+                          maxLength: 63
+                          pattern: ^[a-z_][a-z0-9_]*$
+                          type: string
+                      required:
+                      - column
+                      type: object
+                    table:
+                      description: |-
+                        Table is the target table the operation acts on. Required for
+                        every kind today.
+                      maxLength: 63
+                      pattern: ^[a-z_][a-z0-9_]*$
+                      type: string
+                  required:
+                  - kind
+                  - table
+                  type: object
+                maxItems: 16
+                type: array
+              parallelism:
+                default: 0
+                description: |-
+                  Parallelism controls intra-bundle operation parallelism for the
+                  pgroll-expand-contract strategy. Ops are grouped into "waves"
+                  by table independence — all ops in a wave target distinct
+                  Tables and run concurrently; a new wave starts when the previous
+                  wave commits. Default 0 means fully sequential (pre-B3
+                  behaviour); 1 is identical to 0; 2+ enables wave concurrency up
+                  to the declared cap.
+
+                  Ignored for strategy=versioned — SQL files stay sequential
+                  because Keystone does not parse SQL to analyse table
+                  dependencies. See docs/adrs/0020 for the wave scheduler
+                  rationale.
+                format: int32
+                maximum: 16
+                minimum: 0
+                type: integer
+              policyRef:
+                description: |-
+                  PolicyRef optionally pins the SchemaPolicy this bundle is
+                  validated against. When unset, every SchemaPolicy whose
+                  targetSelector matches applies (intersection-of-stricter rules).
+                maxLength: 253
+                type: string
+              rolloutPolicyRef:
+                description: |-
+                  RolloutPolicyRef optionally pins the staged-rollout policy that
+                  the MigrationController uses to fan out executions. When unset
+                  the bundle fans out to all matched schemas at once (the Phase 3
+                  behaviour, kept for backward compatibility).
+                maxLength: 253
+                type: string
+              schemaSelector:
+                description: |-
+                  SchemaSelector picks the DatabaseSchemas this bundle applies to.
+                  Standard label selector matched against DatabaseSchema.metadata.labels.
+                  A bundle with an empty selector applies to nothing — refused at
+                  admission to prevent accidental no-ops.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              source:
+                description: |-
+                  Source declares where the SQL files come from. Required for
+                  strategy=versioned. Mutually exclusive with Operations.
+                properties:
+                  configMapRef:
+                    description: |-
+                      ConfigMapRef is required when Type=ConfigMap. Lookup is in the
+                      same namespace as the MigrationBundle.
+                    properties:
+                      filePattern:
+                        default: '*.up.sql'
+                        description: |-
+                          FilePattern filters which keys are treated as SQL files. Defaults
+                          to `*.up.sql`.
+                        maxLength: 64
+                        type: string
+                      name:
+                        description: Name of the ConfigMap.
+                        maxLength: 253
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  ociArtifactRef:
+                    description: |-
+                      OCIArtifactRef is required when Type=OCIArtifact. Points to an
+                      OCI artifact in a registry (e.g., Harbor). The artifact's layers
+                      contain SQL migration files. Credentials are resolved from an
+                      imagePullSecret in the bundle's namespace.
+                    properties:
+                      digest:
+                        description: |-
+                          Digest is the OCI manifest digest (e.g., sha256:abc123...).
+                          Preferred over Tag for immutable references. When set, Tag is
+                          ignored.
+                        maxLength: 128
+                        pattern: ^(sha256:[0-9a-f]{64})?$
+                        type: string
+                      filePattern:
+                        default: '*.up.sql'
+                        description: |-
+                          FilePattern filters which files from the artifact are treated
+                          as SQL migrations. Defaults to "*.up.sql".
+                        maxLength: 64
+                        type: string
+                      plainHTTP:
+                        description: |-
+                          PlainHTTP allows pulling from registries without TLS. Default
+                          false. Only set to true for development registries.
+                        type: boolean
+                      pullSecretRef:
+                        description: |-
+                          PullSecretRef names the Secret containing OCI registry
+                          credentials. The Secret must have .dockerconfigjson data
+                          (type kubernetes.io/dockerconfigjson) or plain username/password
+                          keys. Looked up in the MigrationBundle's namespace.
+                        maxLength: 253
+                        type: string
+                      repository:
+                        description: |-
+                          Repository is the full OCI reference without the tag/digest,
+                          e.g., "ghcr.io/dogukanturhal/migrations/billing".
+                        maxLength: 512
+                        type: string
+                      tag:
+                        description: |-
+                          Tag is the OCI tag to pull. Mutually exclusive with Digest.
+                          When both are empty, defaults to "latest".
+                        maxLength: 128
+                        type: string
+                    required:
+                    - repository
+                    type: object
+                  type:
+                    description: Type discriminates the source layer.
+                    enum:
+                    - ConfigMap
+                    - OCIArtifact
+                    - Git
+                    type: string
+                required:
+                - type
+                type: object
+              strategy:
+                default: versioned
+                description: |-
+                  Strategy controls how migrations are applied. Defaults to
+                  versioned; pgroll-expand-contract is Phase 6.
+                enum:
+                - versioned
+                - declarative
+                - pgroll-expand-contract
+                type: string
+              version:
+                description: |-
+                  Version is the bundle's monotonically-increasing identifier.
+                  Display-friendly (semver, date, or integer) but ordering is
+                  lexicographic; pad if you mix lengths. Required.
+
+                  MaxLength bumped 64 → 253 (2026-05-20) to accommodate the
+                  content-addressed bundle naming introduced in commit 372de32:
+                  SchemaDefinitionReconciler emits bundles with
+                  `<sd.Name>-declarative-<64-hex-hash>` which exceeds 64 bytes
+                  for any SD name longer than a few characters. 253 matches the
+                  Kubernetes resource-name limit (RFC 1123 subdomain), which is
+                  the natural upper bound on these identifiers anyway.
+                maxLength: 253
+                pattern: ^[a-zA-Z0-9._-]+$
+                type: string
+            required:
+            - schemaSelector
+            - version
+            type: object
+          status:
+            description: |-
+              MigrationBundleStatus reports rollout progress across all selected
+              schemas.
+            properties:
+              appliedSchemas:
+                description: |-
+                  AppliedSchemas is the count of those schemas where the bundle's
+                  version is recorded as applied.
+                format: int32
+                type: integer
+              approval:
+                description: |-
+                  Approval reports the outcome of evaluating the bundle against
+                  every matched SchemaPolicy.spec.approvalPolicies. Populated on
+                  every reconcile; empty when no matching policy declares approval
+                  rules. The matching condition ConditionTypeApproved carries the
+                  True/False/Unknown signal; this struct carries the per-policy
+                  detail that operators need to triage "why isn't my bundle
+                  admitting?" from kubectl describe alone.
+                properties:
+                  policies:
+                    description: |-
+                      Policies is the per-(SchemaPolicy, ApprovalPolicy) breakdown,
+                      sorted lexicographically for deterministic diffs. Entries for
+                      policies that didn't fire (AppliesWhen=false) appear with
+                      Applied=false so operators see the full rule set that was
+                      considered.
+                    items:
+                      description: PolicyApprovalState is one entry in ApprovalSummary.Policies.
+                      properties:
+                        applied:
+                          description: |-
+                            Applied is true when AppliesWhen fired against this bundle.
+                            When false, Required / Received / Satisfied carry no meaning —
+                            the entry is listed for visibility only.
+                          type: boolean
+                        approvalPolicy:
+                          description: |-
+                            ApprovalPolicy is the nested ApprovalPolicy.Name within
+                            SchemaPolicy.spec.approvalPolicies.
+                          maxLength: 63
+                          type: string
+                        approvers:
+                          description: |-
+                            Approvers lists the approver-ids that counted toward Received,
+                            sorted. Useful for audit trails and kubectl describe.
+                          items:
+                            type: string
+                          maxItems: 32
+                          type: array
+                        received:
+                          description: |-
+                            Received is the count of distinct valid approvers counted:
+                            those whose annotation group appears in FromGroups, minus the
+                            author when DisallowSelfApproval is set.
+                          format: int32
+                          type: integer
+                        required:
+                          description: Required is the count of distinct approvers
+                            the policy demands.
+                          format: int32
+                          type: integer
+                        satisfied:
+                          description: |-
+                            Satisfied is Received >= Required for policies where Applied is
+                            true. Always false when Applied is false.
+                          type: boolean
+                        schemaPolicy:
+                          description: SchemaPolicy is the owning SchemaPolicy.Name.
+                          maxLength: 253
+                          type: string
+                        violation:
+                          description: |-
+                            Violation is a human-readable diagnostic when Satisfied=false:
+                            what was expected, what was received. Empty on satisfaction.
+                          maxLength: 512
+                          type: string
+                      required:
+                      - applied
+                      - approvalPolicy
+                      - satisfied
+                      - schemaPolicy
+                      type: object
+                    maxItems: 64
+                    type: array
+                  satisfied:
+                    description: |-
+                      Satisfied is true when every applicable ApprovalPolicy has
+                      received its required approver count. False when any policy
+                      fires and is under-quorum. True when no policy applies (the
+                      approval gate did not block).
+                    type: boolean
+                required:
+                - satisfied
+                type: object
+              conditions:
+                description: |-
+                  Conditions reports the current state.
+                    Ready   — all matched schemas applied or out-of-scope.
+                    Linted  — squawk/conftest passed; only set after the lint phase.
+                    Planned — at least one MigrationPlan has been created.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              contentHash:
+                description: |-
+                  ContentHash is the SHA-256 of the resolved source content at the
+                  last reconcile. Used by the admission webhook to detect
+                  version-pinning violations (same Version, different SQL).
+                maxLength: 64
+                type: string
+              currentStage:
+                description: |-
+                  CurrentStage is the active rollout stage when a RolloutPolicy is
+                  in effect. Empty when the bundle uses no policy.
+                maxLength: 63
+                type: string
+              integrity:
+                description: |-
+                  Integrity reports the outcome of verifying the bundle's resolved
+                  source against its committed keystone.sum sidecar. Populated on
+                  every reconcile. Empty when the bundle has never been resolved.
+                properties:
+                  files:
+                    description: |-
+                      Files carries per-file integrity entries as reported by
+                      keystone.sum. Present only when Status=Valid — we do not surface
+                      partial sums for Malformed/Mismatch because clients may act on
+                      stale data. Empty on Missing.
+                    items:
+                      description: |-
+                        FileIntegrity is one entry surfaced from a verified keystone.sum.
+                        Deliberately minimal — the sum file in Git is the authoritative
+                        artifact; this slice exists for kubectl describe / dashboards.
+                      properties:
+                        hash:
+                          description: Hash is the hex-encoded SHA-256 recorded for
+                            this file.
+                          maxLength: 64
+                          type: string
+                        name:
+                          description: Name is the filename as it appears in keystone.sum.
+                          maxLength: 253
+                          type: string
+                      required:
+                      - hash
+                      - name
+                      type: object
+                    maxItems: 1024
+                    type: array
+                  message:
+                    description: |-
+                      Message is a human-readable detail. For Mismatch this names the
+                      first divergent file; for Malformed it quotes the parse error.
+                      Empty for Valid and Missing.
+                    maxLength: 512
+                    type: string
+                  rootHash:
+                    description: |-
+                      RootHash is the directory-level SHA-256 declared by keystone.sum.
+                      Empty when Status=Missing. Surfaced so operators can grep audit
+                      logs for a specific bundle snapshot.
+                    maxLength: 64
+                    type: string
+                  status:
+                    description: |-
+                      Status is the outcome classification. One of:
+                        Valid      — keystone.sum present and every hash matches
+                        Missing    — no keystone.sum in the resolved source
+                        Malformed  — keystone.sum present but failed to parse
+                        Mismatch   — keystone.sum present but hashes diverge
+                    enum:
+                    - Valid
+                    - Missing
+                    - Malformed
+                    - Mismatch
+                    type: string
+                required:
+                - status
+                type: object
+              lastPlanTime:
+                description: |-
+                  LastPlanTime is when the controller last generated a MigrationPlan
+                  from this bundle.
+                format: date-time
+                type: string
+              lintFindings:
+                description: |-
+                  LintFindings holds analyzer output from the plan phase. Populated
+                  on every reconcile by the default analyzer registry (20 rules
+                  today; configurable via SchemaPolicy in a later phase).
+                  Cleared when no findings. Findings at severity >= "error" block
+                  Ready=True.
+                items:
+                  description: |-
+                    LintFinding is a single squawk/conftest finding produced during the
+                    plan phase.
+                  properties:
+                    file:
+                      description: File is the SQL filename within the source where
+                        the finding fired.
+                      maxLength: 253
+                      type: string
+                    line:
+                      description: Line is the 1-indexed line in the source file.
+                        0 if not applicable.
+                      format: int32
+                      minimum: 0
+                      type: integer
+                    message:
+                      description: Message is a human-readable description.
+                      maxLength: 4096
+                      type: string
+                    rule:
+                      description: |-
+                        Rule is the linter's rule identifier (e.g. squawk's
+                        "adding-required-field" or conftest's "deny-truncate").
+                      maxLength: 128
+                      type: string
+                    severity:
+                      description: 'Severity matches LintLevel: error | warning |
+                        notice.'
+                      enum:
+                      - error
+                      - warning
+                      - notice
+                      type: string
+                  required:
+                  - message
+                  - rule
+                  - severity
+                  type: object
+                maxItems: 512
+                type: array
+              matchedSchemas:
+                description: |-
+                  MatchedSchemas is the count of DatabaseSchemas currently selected.
+                  Recomputed on every reconcile.
+                format: int32
+                type: integer
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              schemaProgress:
+                description: |-
+                  SchemaProgress is the per-schema rollout breakdown — one entry
+                  per DatabaseSchema matched by spec.schemaSelector. Populated on
+                  every reconcile; stale entries (schema no longer matched) are
+                  pruned. Used for "kubectl describe migrationbundle" visibility
+                  and dashboards that need per-tenant granularity rather than the
+                  aggregate matched/applied counts above.
+
+                  Capped at 256 entries so the status CR stays within etcd's
+                  1.5 MiB value-size ceiling even on large multi-tenant fanouts;
+                  bundles matching more than 256 schemas must rely on the
+                  per-execution MigrationExecution CR list for full visibility.
+                items:
+                  description: |-
+                    SchemaProgress is one entry in MigrationBundleStatus.SchemaProgress
+                    — the observed state of a single (bundle, version, schema) triple's
+                    MigrationExecution. Operators read this for per-tenant triage when
+                    a bundle fans out across dozens of tenant databases.
+                  properties:
+                    completedAt:
+                      description: |-
+                        CompletedAt is the execution's CompletionTime (when Succeeded,
+                        Failed, or Aborted was set). Empty while in-flight.
+                      format: date-time
+                      type: string
+                    executionRef:
+                      description: |-
+                        ExecutionRef is the MigrationExecution.metadata.name associated
+                        with this (bundle, version, schema) triple. Empty when the
+                        execution has not yet been created (throttled, awaiting earlier
+                        stage).
+                      maxLength: 253
+                      type: string
+                    message:
+                      description: |-
+                        Message is a short diagnostic — the first line of the
+                        execution's Ready condition message. Empty when the execution
+                        is in a nominal state.
+                      maxLength: 512
+                      type: string
+                    phase:
+                      description: |-
+                        Phase mirrors the MigrationExecution.status.phase at observation
+                        time. Empty when no Execution exists yet.
+                      maxLength: 32
+                      type: string
+                    schemaRef:
+                      description: SchemaRef is the DatabaseSchema's metadata.name.
+                      maxLength: 253
+                      type: string
+                    startedAt:
+                      description: |-
+                        StartedAt is the execution's StartTime (when Apply began).
+                        Empty until the execution enters Running / Expanding.
+                      format: date-time
+                      type: string
+                    tenantID:
+                      description: |-
+                        TenantID carries the value of the DatabaseSchema's
+                        keystone.hexxlock.io/tenant-id label when set. Empty when the
+                        schema was not labelled. Surfaced so dashboards can group
+                        rollouts by tenant without joining against ProductInstance.
+                      maxLength: 253
+                      type: string
+                  required:
+                  - schemaRef
+                  type: object
+                maxItems: 256
+                type: array
+              stageHistory:
+                description: |-
+                  StageHistory records progress through each stage of the
+                  referenced RolloutPolicy. Append-only.
+                items:
+                  description: StageProgress is one entry in MigrationBundleStatus.StageHistory.
+                  properties:
+                    completedAt:
+                      description: |-
+                        CompletedAt is when the controller advanced past this stage
+                        (soak elapsed + approval received if required). Empty until
+                        completion.
+                      format: date-time
+                      type: string
+                    failed:
+                      description: |-
+                        Failed is the count of executions that ended in Failed. When >0
+                        AND the stage's AbortOnFailure is true, the rollout freezes.
+                      format: int32
+                      type: integer
+                    name:
+                      description: Name matches RolloutStage.Name.
+                      maxLength: 63
+                      type: string
+                    soakStartedAt:
+                      description: |-
+                        SoakStartedAt is when the controller observed all stage targets
+                        reach Succeeded and started the soak timer. Empty until that
+                        happens.
+                      format: date-time
+                      type: string
+                    startedAt:
+                      description: |-
+                        StartedAt is when the controller first dispatched executions
+                        for this stage.
+                      format: date-time
+                      type: string
+                    succeeded:
+                      description: |-
+                        Succeeded is the count of those that reached Succeeded. When
+                        Targets == Succeeded the soak timer starts.
+                      format: int32
+                      type: integer
+                    targets:
+                      description: Targets is the count of DatabaseSchemas selected
+                        by this stage.
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  - startedAt
+                  type: object
+                maxItems: 16
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

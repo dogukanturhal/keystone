@@ -1,0 +1,105 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- if .Values.webhook.enabled }}
+# ValidatingWebhookConfiguration. Derived from config/webhook/manifests.yaml
+# (controller-gen output), with service name, namespace, and CA injection
+# templatised so the chart's own Certificate wires in.
+#
+# cert-manager.io/inject-ca-from annotation: cert-manager watches this
+# object and replaces .webhooks[*].clientConfig.caBundle with the CA from
+# the named Certificate every time it rotates. Keeps rotation invisible
+# to API consumers.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "keystone-operator.fullname" . }}-validating-webhook
+  labels:
+    {{- include "keystone-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.webhook.certManager.enabled }}
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "keystone-operator.webhookCertName" . }}
+    {{- end }}
+webhooks:
+  - name: vmigrationbundle.kb.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "keystone-operator.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-keystone-hexxlock-io-v1alpha1-migrationbundle
+    rules:
+      - apiGroups: [keystone.hexxlock.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [migrationbundles]
+  - name: vschemadefinition.kb.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "keystone-operator.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-keystone-hexxlock-io-v1alpha1-schemadefinition
+    rules:
+      - apiGroups: [keystone.hexxlock.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [schemadefinitions]
+  # Append-only enforcement for the audit chain. This is the control the
+  # compliance mappings rest on, so it is NOT optional: without it an
+  # AuditEntry can be updated or deleted through the apiserver and the
+  # hash chain can be rewritten with nothing to show for it.
+  #
+  # DELETE is included deliberately. The validator permits a delete only
+  # once the entry is past AuditLog.spec.retentionDays, which is what
+  # lets the retention controller prune while still refusing every
+  # premature deletion, including one issued by the operator itself.
+  - name: vauditentry.kb.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "keystone-operator.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-keystone-hexxlock-io-v1alpha1-auditentry
+    rules:
+      - apiGroups: [keystone.hexxlock.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [auditentries]
+  # Isolation admission. The CRD enum accepts pool/bridge/silo but only
+  # bridge is provisioned, so without these two a ProductDefinition can
+  # declare database-per-tenant isolation and silently receive a shared
+  # database. Must stay in lockstep with config/webhook/manifests.yaml.
+  - name: vproductdefinition.kb.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "keystone-operator.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-keystone-hexxlock-io-v1alpha1-productdefinition
+    rules:
+      - apiGroups: [keystone.hexxlock.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [productdefinitions]
+  - name: vproductinstance.kb.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "keystone-operator.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-keystone-hexxlock-io-v1alpha1-productinstance
+    rules:
+      - apiGroups: [keystone.hexxlock.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [productinstances]
+{{- end }}
