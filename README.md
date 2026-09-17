@@ -112,7 +112,7 @@ Cloud and OSS are interoperable. Migrating between them is a CRD export.
 ## Audit pipeline (T2 #25)
 
 Keystone implements a dual-write audit pipeline to meet the 7-year WORM
-retention mandate (`project_security_stack_tier1_2026_04_27`) while
+retention mandate while
 simultaneously offloading audit storage pressure from etcd
 (internal engineering notes).
 

@@ -415,7 +415,7 @@ func run(o *options, logger *zap.Logger) error {
 	// T2 #25 Phase 5a — fail-fast: AUDIT_WRITE_CR=false requires AUDIT_NATS_URL.
 	// Without a durable NATS sink, every audit event would be silently dropped —
 	// no CR write, no NATS publish, no SIEM record. This violates the 7-year WORM
-	// mandate (project_security_stack_tier1_2026_04_27). Refuse to start rather
+	// mandate. Refuse to start rather
 	// than create a silent compliance hole. Checked here, before ctrl.NewManager,
 	// so the test in main_test.go is hermetic (no kubeconfig required).
 	if !o.auditWriteCR && o.auditNATSURL == "" {

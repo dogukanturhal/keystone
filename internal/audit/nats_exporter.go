@@ -12,7 +12,7 @@
 // missed entries after a NATS outage.
 //
 // Architecture refs:
-//   - project_security_stack_tier1_2026_04_27 — 7-year WORM mandate
+//   - a 7-year WORM retention mandate
 //   - internal engineering notes on high-cardinality CRD list OOMs — root
 //     cause motivating the etcd → NATS → MinIO offload
 
