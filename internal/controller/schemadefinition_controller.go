@@ -657,7 +657,7 @@ func (r *SchemaDefinitionReconciler) markDestructiveBlocked(
 // MigrationExecution reconciler reads the annotation on Phase=Succeeded
 // and stamps DatabaseSchema.Status.LastAppliedFingerprint = annotation
 // value, enabling identity-based per-schema convergence checks
-// (pkg/sdk/keystone.WaitSchemaFingerprint).
+// (keystone-sdk/go/keystone.WaitSchemaFingerprint).
 //
 // Marshaling via encoding/json with sorted map keys (Go's default for
 // struct fields is declaration order; for any map[string]X fields

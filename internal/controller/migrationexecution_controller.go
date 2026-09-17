@@ -584,7 +584,7 @@ func (r *MigrationExecutionReconciler) markSucceeded(
 	r.ensureAutoSnapshot(ctx, exec)
 	// Phase-2b SDK feedback loop — copy the parent bundle's
 	// SD-fingerprint annotation onto DatabaseSchema.Status.LastAppliedFingerprint
-	// so SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) can
+	// so SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) can
 	// verify identity-based per-schema convergence. Best-effort:
 	// failures log + continue (the SQL already committed).
 	r.stampDatabaseSchemaFingerprint(ctx, exec)

@@ -2,7 +2,7 @@
 {{- if .Values.rbac.create }}
 # Mirror of config/rbac/tenant_enroller_clusterrole.yaml. The kustomize
 # bundle and this helm chart MUST stay in lock-step on this object —
-# the SDK helpers in pkg/sdk/keystone/enroll.go (added in v0.1.43) hard-
+# the SDK helpers in the keystone-sdk repository (go/keystone/enroll.go) (added in v0.1.43) hard-
 # code the cluster role name `keystone-tenant-enroller`, so consumers
 # of either install path expect the exact same name.
 #

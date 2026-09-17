@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Lockstep manifest — resources whose names are hardcoded in the
-# Keystone SDK (pkg/sdk/keystone/) or in external consumer manifests
+# Keystone SDK (keystone-sdk repo, go/keystone/) or in external consumer manifests
 # (RoleBindings authored in the GitOps repository, etc.). Both the helm
 # chart AND the kustomize bundle MUST render each entry verbatim;
 # divergence between install paths breaks SDK callers using one path

@@ -110,7 +110,7 @@ const (
 	// the MigrationExecution reconciler reads it on Phase=Succeeded to
 	// stamp DatabaseSchema.Status.LastAppliedFingerprint = annotation
 	// value, enabling identity-based per-schema convergence checks
-	// (pkg/sdk/keystone.WaitSchemaFingerprint).
+	// (keystone-sdk/go/keystone.WaitSchemaFingerprint).
 	//
 	// Hand-authored MigrationBundles don't carry this annotation;
 	// MigrationExecution reconciler skips the stamp in that case.
