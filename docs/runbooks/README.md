@@ -23,7 +23,7 @@ New runbook guidelines:
 ## Planned (roadmap)
 
 The following runbooks are committed for Phase 12+ but not yet
-written. Track progress in [`roadmap-tier1-gaps.md`](../roadmap-tier1-gaps.md).
+written. Track progress in the internal roadmap.
 
 | Runbook | Trigger |
 |---|---|

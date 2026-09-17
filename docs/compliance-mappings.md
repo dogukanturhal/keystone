@@ -37,7 +37,7 @@ compliance programmes.
 
 Where a control is load-bearing but **not shipped yet**, the row is tagged
 `[planned — Phase NN.NN]` using the phase numbers from `docs/roadmap.md` and
-`docs/roadmap-tier1-gaps.md`. A `planned` row is honest about the gap; it is
+the internal roadmap. A `planned` row is honest about the gap; it is
 not evidence of meeting anything today.
 
 ## Summary — top controls by framework
