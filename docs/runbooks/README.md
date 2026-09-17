@@ -27,9 +27,6 @@ written. Track progress in the internal roadmap.
 
 | Runbook | Trigger |
 |---|---|
-| `downgrade.md` | Roll back from keystone-manager vN to vN-1 |
-| `dr-drill.md` | Quarterly disaster-recovery exercise (restore from etcd + PG backup) |
-| `slo-burn.md` | Multi-window burn-rate alert fired — see ADR 0014 |
 | `credential-rotation.md` | Rotate admin credentials without a manager restart |
 | `tenant-offboard.md` | Remove a tenant's databases + schemas cleanly |
 
