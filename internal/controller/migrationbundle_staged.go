@@ -22,13 +22,13 @@ import (
 
 // reconcileStaged drives a MigrationBundle through a RolloutPolicy
 // pipeline. Stages are processed in order; each stage:
-//   1. selects a subset of the bundle's matched schemas (combination of
-//      schema-label selector + cluster-tier filter)
-//   2. creates MigrationExecutions for that subset, capped by parallelism
-//   3. waits for all stage executions to reach Succeeded
-//   4. starts a soak timer
-//   5. (optionally) waits for an approval annotation
-//   6. advances to the next stage
+//  1. selects a subset of the bundle's matched schemas (combination of
+//     schema-label selector + cluster-tier filter)
+//  2. creates MigrationExecutions for that subset, capped by parallelism
+//  3. waits for all stage executions to reach Succeeded
+//  4. starts a soak timer
+//  5. (optionally) waits for an approval annotation
+//  6. advances to the next stage
 //
 // All-at-once fanout (Phase 3 behaviour) is retained for bundles
 // without spec.rolloutPolicyRef — see reconcileAllAtOnce in the main
@@ -69,7 +69,6 @@ func (r *MigrationBundleReconciler) reconcileStaged(
 		// Stage referenced in status no longer exists in policy. Reset
 		// to the first stage and let the rollout re-flow.
 		currentIdx = 0
-		currentName = policy.Spec.Stages[0].Name
 	}
 	stage := policy.Spec.Stages[currentIdx]
 
@@ -249,7 +248,7 @@ func (r *MigrationBundleReconciler) reconcileStaged(
 			}
 			r.Recorder.Eventf(bundle, corev1.EventTypeNormal, "StageAdvanced",
 				"stage %q complete; advancing to %q", stage.Name, next.Name)
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 		}
 		// Last stage: rollout complete.
 		bundle.Status.CurrentStage = ""

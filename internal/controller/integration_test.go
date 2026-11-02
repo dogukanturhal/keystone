@@ -38,6 +38,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
@@ -115,6 +116,7 @@ func getHarness(t *testing.T) *pgHarness {
 			sharedHarnessErr = err
 			return
 		}
+		t.Logf("started throwaway PostgreSQL 16 container: %s", c.GetContainerID())
 		host, herr := c.Host(ctx)
 		if herr != nil {
 			sharedHarnessErr = herr
@@ -494,7 +496,7 @@ func TestIntegration_MigrationExecution_AppliesVersionedSQL(t *testing.T) {
 	// "public" already exists with a different owner — simpler to
 	// manually flip Ready=True here.
 	dbs := &keystonev1alpha1.DatabaseSchema{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "keystone-system", Name: "it-mig-schema"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "keystone-system", Name: "it-mig-schema", Labels: map[string]string{"it": "mig"}},
 		Spec: keystonev1alpha1.DatabaseSchemaSpec{
 			Name:               schemaName,
 			LogicalDatabaseRef: ldb.Name,
@@ -584,7 +586,7 @@ func TestIntegration_MigrationExecution_AppliesVersionedSQL(t *testing.T) {
 
 	// Step 6: MigrationExecution — drive to Succeeded.
 	exec := &keystonev1alpha1.MigrationExecution{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "keystone-system", Name: "it-mig-exec"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "keystone-system", Name: executionName(bundle.Name, version, dbs.Name)},
 		Spec: keystonev1alpha1.MigrationExecutionSpec{
 			PlanRef:       plan.Name,
 			BundleRef:     bundle.Name,
@@ -592,6 +594,9 @@ func TestIntegration_MigrationExecution_AppliesVersionedSQL(t *testing.T) {
 			SchemaRef:     dbs.Name,
 			ContentHash:   contentHash,
 		},
+	}
+	if err := controllerutil.SetControllerReference(bundle, exec, clientgoscheme.Scheme); err != nil {
+		t.Fatalf("owner reference: %v", err)
 	}
 	if err := k8s.Create(ctx, exec); err != nil {
 		t.Fatalf("create exec: %v", err)
@@ -679,6 +684,86 @@ func TestIntegration_MigrationExecution_AppliesVersionedSQL(t *testing.T) {
 	}
 	if !strings.EqualFold(tableSchema, schemaName) {
 		t.Errorf("schema_migrations in schema %q, want %q", tableSchema, schemaName)
+	}
+
+	// Regression: reuse the existing bundle for a new version and SQL.
+	// Drive actual bundle fanout -> plan approval -> execution -> PG16,
+	// and verify both tracking rows retain their own immutable hashes.
+	mbR := &MigrationBundleReconciler{Client: k8s, Scheme: clientgoscheme.Scheme,
+		Recorder: record.NewFakeRecorder(32), Resolver: migration.NewConfigMapResolver(k8s)}
+	mbReq := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(bundle)}
+	for i := 0; i < 2; i++ {
+		if _, err := mbR.Reconcile(ctx, mbReq); err != nil {
+			t.Fatalf("initial bundle pin: %v", err)
+		}
+	}
+	if err := k8s.Get(ctx, mbReq.NamespacedName, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Status.ContentHashVersion != version || bundle.Status.ContentHash != contentHash {
+		t.Fatalf("initial bundle hash/version not pinned: %+v", bundle.Status)
+	}
+	cm.Data = map[string]string{"002_next.up.sql": "CREATE TABLE demo_next (id int PRIMARY KEY);"}
+	if err := k8s.Update(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mbR.Reconcile(ctx, mbReq); err == nil {
+		t.Fatal("same-version SQL edit was allowed")
+	}
+	if err := k8s.Get(ctx, mbReq.NamespacedName, bundle); err != nil {
+		t.Fatal(err)
+	}
+	bundle.Spec.Version = "002"
+	if err := k8s.Update(ctx, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mbR.Reconcile(ctx, mbReq); err != nil {
+		t.Fatalf("version+SQL bump: %v", err)
+	}
+	newKey := client.ObjectKey{Namespace: bundle.Namespace, Name: executionName(bundle.Name, "002", dbs.Name)}
+	var next keystonev1alpha1.MigrationExecution
+	if err := k8s.Get(ctx, newKey, &next); err != nil {
+		t.Fatalf("new execution not dispatched: %v", err)
+	}
+	newPlan := &keystonev1alpha1.MigrationPlan{}
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: next.Namespace, Name: next.Spec.PlanRef}, newPlan); err != nil {
+		t.Fatal(err)
+	}
+	newPlan.Spec.Approved = true // isolate plan gate exactly as v1 above
+	if err := k8s.Update(ctx, newPlan); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := mxR.Reconcile(ctx, ctrl.Request{NamespacedName: newKey}); err != nil {
+			t.Fatalf("new execution: %v", err)
+		}
+		if err := k8s.Get(ctx, newKey, &next); err != nil {
+			t.Fatal(err)
+		}
+		if next.Status.Phase == keystonev1alpha1.ExecutionPhaseSucceeded {
+			break
+		}
+	}
+	if next.Status.Phase != keystonev1alpha1.ExecutionPhaseSucceeded {
+		t.Fatalf("new version failed: %+v", next.Status)
+	}
+	if _, err := mbR.Reconcile(ctx, mbReq); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8s.Get(ctx, mbReq.NamespacedName, bundle); err != nil {
+		t.Fatal(err)
+	}
+	ready := findCondition(bundle.Status.Conditions, keystonev1alpha1.ConditionTypeReady)
+	if ready == nil || ready.Status != metav1.ConditionTrue || bundle.Status.ContentHashVersion != "002" {
+		t.Fatalf("new version not ready/pinned: %+v", bundle.Status)
+	}
+	for _, row := range []struct{ version, hash string }{{version, contentHash}, {"002", next.Spec.ContentHash}} {
+		if err := targetPool.QueryRow(ctx, query, row.version).Scan(&gotVersion, &gotHash); err != nil || gotHash != row.hash {
+			t.Fatalf("tracking row %s: hash=%s err=%v", row.version, gotHash, err)
+		}
+	}
+	if err := targetPool.QueryRow(ctx, `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'demo_next'`).Scan(&tbl); err != nil {
+		t.Fatalf("new SQL not applied: %v", err)
 	}
 }
 

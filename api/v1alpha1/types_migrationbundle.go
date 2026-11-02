@@ -105,7 +105,7 @@ type MigrationSource struct {
 // MigrationOCISource references an OCI artifact containing SQL files.
 type MigrationOCISource struct {
 	// Repository is the full OCI reference without the tag/digest,
-	// e.g., "ghcr.io/dogukanturhal/migrations/billing".
+	// e.g., "registry.example.com/migrations/billing".
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=512
@@ -386,13 +386,23 @@ type MigrationBundleStatus struct {
 	// +kubebuilder:validation:MaxItems=512
 	LintFindings []LintFinding `json:"lintFindings,omitempty"`
 
-	// ContentHash is the SHA-256 of the resolved source content at the
-	// last reconcile. Used by the admission webhook to detect
+	// ContentHash is the SHA-256 of the resolved source content pinned for
+	// ContentHashVersion. Used by the admission webhook to detect
 	// version-pinning violations (same Version, different SQL).
 	//
 	// +optional
 	// +kubebuilder:validation:MaxLength=64
 	ContentHash string `json:"contentHash,omitempty"`
+
+	// ContentHashVersion is the spec.version to which ContentHash belongs.
+	// Empty on legacy objects: the controller recovers the last pinned
+	// version from executions or the last Planned condition, falling back
+	// to spec.version when no historical evidence exists.
+	// No default: existing objects must retain their legacy meaning.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	ContentHashVersion string `json:"contentHashVersion,omitempty"`
 
 	// Integrity reports the outcome of verifying the bundle's resolved
 	// source against its committed keystone.sum sidecar. Populated on

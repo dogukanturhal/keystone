@@ -3,7 +3,6 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -58,7 +57,7 @@ func (s *stubArchiver) Archive(_ context.Context, batch []keystonev1alpha1.Audit
 
 func (s *stubArchiver) Kind() string { return "stub" }
 
-type discardLogger struct{ buf bytes.Buffer }
+type discardLogger struct{}
 
 func (d *discardLogger) Info(msg string, kv ...any)             {}
 func (d *discardLogger) Error(err error, msg string, kv ...any) {}

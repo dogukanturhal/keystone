@@ -37,7 +37,7 @@ compliance programmes.
 
 Where a control is load-bearing but **not shipped yet**, the row is tagged
 `[planned — Phase NN.NN]` using the phase numbers from `docs/roadmap.md` and
-the internal roadmap. A `planned` row is honest about the gap; it is
+its tier-one backlog. A `planned` row is honest about the gap; it is
 not evidence of meeting anything today.
 
 ## Summary — top controls by framework
@@ -221,7 +221,7 @@ GDPR-relevant technical measures under Art. 32 (security of processing):
 | (1)(c) ability to restore availability and access in a timely manner | Partial | Upstream PG backup / CNPG recovery is out of scope; Keystone resumes idempotently on restart |
 | (1)(d) regular testing | Meets | `docs/pentest-scope.md` + CI `make verify` |
 | (2) assessment of risk | Meets (project-side) | ADR series + `docs/pentest-scope.md` |
-| Art. 28 processor contract | N/A today | DPA applies only if HexxLock Cloud is in the picture; DPA lives as a legal document (not markdown) — customers requesting one email `maintainers@hexxlock.com` |
+| Art. 28 processor contract | N/A today | DPA applies only if HexxLock Cloud is in the picture; DPA lives as a legal document (not markdown) — customers requesting one email `dogukanturhal@hexxlock.com` |
 
 **Data Processing Agreement**: the DPA template is a legal document held
 outside this repo (it is not a markdown file). When HexxLock Cloud ships,
@@ -239,9 +239,9 @@ for the OSS tier.
 | Artefact | Location | Format | Retention |
 |---|---|---|---|
 | SBOM | `bin/keystone-sbom.spdx.json`; OCI referrer on every release image | SPDX JSON | Per release, indefinitely via image tags |
-| Signed images | `ghcr.io/dogukanturhal/keystone-manager:<tag>` and `github.com/hexxlock/keystone` once mirrored | cosign-keyless, OIDC from GitLab CI | Per release, indefinitely |
+| Signed images | `ghcr.io/dogukanturhal/keystone-manager:<tag>` and `github.com/dogukanturhal/keystone` once mirrored | cosign-keyless, OIDC from GitLab CI | Per release, indefinitely |
 | Vulnerability scan reports | GitLab CI artefacts per release; `make vuln-scan` regenerates | Trivy JSON | Per release |
-| Pentest report | Held by `security@hexxlock.com`; attestation letter customer-shareable, full report under NDA | PDF + JSON / SARIF | Per engagement (~yearly) |
+| Pentest report | Held by `dogukanturhal@hexxlock.com`; attestation letter customer-shareable, full report under NDA | PDF + JSON / SARIF | Per engagement (~yearly) |
 | Audit logs (operator) | Kubernetes cluster log pipeline (customer-owned) | stdout/stderr JSON via zap | Customer-controlled |
 | Audit logs (data plane) | `schema_migrations` table rows + DriftReport CRs | SQL + YAML | As long as the DB exists |
 | ADR log — decisions | `docs/adrs/` in git | Markdown | Git history |

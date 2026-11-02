@@ -4,6 +4,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -22,13 +22,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/dogukanturhal/keystone-sdk/go/declarative"
+	"github.com/dogukanturhal/keystone-sdk/go/drift"
+	"github.com/dogukanturhal/keystone-sdk/go/migration"
 	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone/internal/audit"
 	"github.com/dogukanturhal/keystone/internal/conditions"
-	"github.com/dogukanturhal/keystone-sdk/go/migration"
 	"github.com/dogukanturhal/keystone/internal/migration/pgroll"
 	pg "github.com/dogukanturhal/keystone/internal/postgres"
 )
@@ -39,7 +42,7 @@ import (
 type MigrationExecutionReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Pools    *pg.PoolCache
 	Resolver migration.SourceResolver
 
@@ -93,7 +96,7 @@ func (r *MigrationExecutionReconciler) Reconcile(ctx context.Context, req ctrl.R
 		if err := r.Update(ctx, &exec); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	// Resolve bundle (same namespace as execution).
@@ -183,9 +186,9 @@ func (r *MigrationExecutionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// trackingTableName comes from the LogicalDatabase (defaults to
-	// "schema_migrations"). Example Service overrides this to
+	// "schema_migrations"). Falcon-ID overrides this to
 	// "keystone_schema_migrations" so Keystone's TEXT-PK tracking table
-	// co-exists with Example Service's existing INTEGER-PK schema_migrations.
+	// co-exists with Falcon-ID's existing INTEGER-PK schema_migrations.
 	//
 	// ownerRole is the LogicalDatabase's spec.ownerRole — the runner
 	// SET LOCAL ROLE's to this PG role inside the migration tx so
@@ -239,11 +242,24 @@ func (r *MigrationExecutionReconciler) Reconcile(ctx context.Context, req ctrl.R
 				exec.Spec.BundleVersion, len(src.Names)))
 	}
 
-	// Apply.
+	// Apply. The runner holds a per-schema advisory lock; the precheck runs
+	// under it, before any SQL, so a declarative plan computed against an
+	// older schema state can't execute (it would replay stale DDL), and the
+	// pre-apply structure hash is read while nothing else is mutating.
+	pc := &applyPrecheck{
+		r: r, pool: pool, bundle: &bundle, exec: &exec, schema: schema.Spec.Name,
+		inspect: provider.Spec.PoolMaxConns != 1, // precheck needs a 2nd conn beside the runner's
+	}
+	runner.Precheck = pc.run
 	result, applyErr := runner.Apply(ctx, exec.Spec.BundleVersion, exec.Spec.ContentHash, src)
 	if applyErr != nil {
+		var stale *stalePlanError
+		if errors.As(applyErr, &stale) {
+			return r.markStale(ctx, &exec, stale)
+		}
 		return r.markFailed(ctx, &exec, result, applyErr)
 	}
+	pc.advanceBaseline(ctx, exec.Spec.BundleVersion, logger)
 
 	logger.Info("applied", "version", exec.Spec.BundleVersion, "files", len(result.Files), "duration_ms", result.TotalDurationMS)
 	return r.markSucceeded(ctx, &exec, result.Files, result.TotalDurationMS, "Applied",
@@ -584,7 +600,7 @@ func (r *MigrationExecutionReconciler) markSucceeded(
 	r.ensureAutoSnapshot(ctx, exec)
 	// Phase-2b SDK feedback loop — copy the parent bundle's
 	// SD-fingerprint annotation onto DatabaseSchema.Status.LastAppliedFingerprint
-	// so SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) can
+	// so SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) can
 	// verify identity-based per-schema convergence. Best-effort:
 	// failures log + continue (the SQL already committed).
 	r.stampDatabaseSchemaFingerprint(ctx, exec)
@@ -706,6 +722,44 @@ func autoSnapshotName(bundle, version, schema string) string {
 	return name
 }
 
+// classifyApplyFailure maps a handful of well-known PostgreSQL SQLSTATEs to a
+// specific condition reason so operators (and tooling reading
+// status.conditions) can tell "the target object already exists" and "the
+// migration runner lacks ownership" apart from an arbitrary DDL failure,
+// without changing what SQL is executed or masking the failure with an
+// `IF NOT EXISTS` guard. The bundle still ends up Failed either way — this
+// only refines *why*.
+//
+//   - 42P07 (duplicate_table / already-exists family): the declarative-diff
+//     generator planned a CREATE against an object that was introspected as
+//     absent but was created by a different, concurrently-applied bundle
+//     before this execution's Apply ran (TOCTOU between diff-time inspection
+//     and apply-time execution — diff-time inspection is always live, see
+//     SchemaDefinitionReconciler.inspectAndDiffAll). The object is very
+//     likely already in the desired shape; the corrective action is a
+//     RecordOnly bundle for this version (ADR 0027), never IF NOT EXISTS.
+//   - 42501 (insufficient_privilege): the runner's SET ROLE/SET LOCAL ROLE
+//     landed on a session that does not own the target relation. This is an
+//     ownership-model gap for that object (see LogicalDatabase.spec.ownerRole
+//     and migration.Runner.Apply), not a transient race, and needs a DB-side
+//     ALTER ... OWNER TO plus, ideally, a ddl_command_end event trigger that
+//     reassigns ownership going forward. The operator reports such objects on
+//     the LogicalDatabase OwnershipDrift condition and, only when
+//     spec.ownershipRemediation=ReassignFromConnectionRole, moves the ones
+//     owned by its own connection role; everything else needs a superuser.
+func classifyApplyFailure(cause error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(cause, &pgErr) {
+		switch pgErr.Code {
+		case "42P07":
+			return "ApplyFailedObjectAlreadyExists"
+		case "42501":
+			return "ApplyFailedInsufficientPrivilege"
+		}
+	}
+	return "ApplyFailed"
+}
+
 func (r *MigrationExecutionReconciler) markFailed(
 	ctx context.Context,
 	exec *keystonev1alpha1.MigrationExecution,
@@ -724,14 +778,20 @@ func (r *MigrationExecutionReconciler) markFailed(
 	} else {
 		exec.Status.FailureMessage = truncate(cause.Error(), 4096)
 	}
-	exec.Status.Conditions = conditions.MarkNotReady(exec.Status.Conditions, "ApplyFailed", cause, exec.Generation)
+	reason := classifyApplyFailure(cause)
+	condCause := cause
+	if reason == "ApplyFailedInsufficientPrivilege" {
+		condCause = fmt.Errorf("%w (hint: check the LogicalDatabase %s condition for objects with an unexpected owner)",
+			cause, keystonev1alpha1.ConditionTypeOwnershipDrift)
+	}
+	exec.Status.Conditions = conditions.MarkNotReady(exec.Status.Conditions, reason, condCause, exec.Generation)
 	if err := r.Status().Patch(ctx, exec, patch); err != nil {
 		return ctrl.Result{}, fmt.Errorf("patch failure status: %w (cause: %v)", err, cause)
 	}
 	if r.Recorder != nil {
-		r.Recorder.Eventf(exec, corev1.EventTypeWarning, "ApplyFailed", "%s", cause.Error())
+		r.Recorder.Eventf(exec, corev1.EventTypeWarning, reason, "%s", cause.Error())
 	}
-	r.emitAudit(ctx, exec, "apply", "ApplyFailed: "+cause.Error(), "error")
+	r.emitAudit(ctx, exec, "apply", reason+": "+cause.Error(), "error")
 	return ctrl.Result{}, cause
 }
 
@@ -783,12 +843,12 @@ func (r *MigrationExecutionReconciler) resolveCredentials(ctx context.Context, p
 	}
 	u, ok := sec.Data[userKey]
 	if !ok || len(u) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, userKey)
 	}
 	pw, ok := sec.Data[passKey]
 	if !ok || len(pw) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, passKey)
 	}
 	return resolvedCreds{Username: string(u), Password: string(pw)}, nil
@@ -815,7 +875,7 @@ func (r *MigrationExecutionReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		r.SystemNamespace = "keystone-system"
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-migrationexecution")
+		r.Recorder = eventRecorderFor(mgr, "keystone-migrationexecution")
 	}
 	if r.Resolver == nil {
 		// APIReader (uncached) — the operator's ConfigMap cache is
@@ -929,8 +989,150 @@ func truncate(s string, n int) string {
 	return s[:n-32] + "… [truncated]"
 }
 
-// loggerKey is unused but reserved for adding zap-style structured fields
-// from Reconcile in a future refactor that lifts logging into a sidecar.
-type loggerKey struct{}
-
 var _ logr.Logger // keep go-logr in import set; metric controllers use it
+
+// stalePlanError means a declarative bundle no longer reflects its
+// SchemaDefinition or the live schema; the execution aborts without SQL.
+type stalePlanError struct{ msg string }
+
+func (e *stalePlanError) Error() string { return e.msg }
+
+// applyPrecheck is the migration.Runner.Precheck for one execution. It runs
+// with the per-schema advisory lock held.
+type applyPrecheck struct {
+	r       *MigrationExecutionReconciler
+	pool    *pgxpool.Pool
+	bundle  *keystonev1alpha1.MigrationBundle
+	exec    *keystonev1alpha1.MigrationExecution
+	schema  string
+	inspect bool // false when the pool is too small to inspect beside the runner's conn
+
+	preHash string // structure hash observed under the lock; "" if not inspected
+}
+
+func (p *applyPrecheck) run(ctx context.Context) error {
+	declarativeBundle := p.bundle.Labels[keystonev1alpha1.LabelSource] == "declarative-diff"
+	if !p.inspect {
+		if declarativeBundle {
+			return p.checkSD(ctx, nil)
+		}
+		return nil
+	}
+	snap, err := drift.NewInspector(p.pool).Inspect(ctx, p.schema)
+	if err != nil {
+		return fmt.Errorf("pre-apply inspect: %w", err)
+	}
+	if h, hErr := drift.Hash(snap); hErr == nil {
+		p.preHash = h
+	}
+	if declarativeBundle {
+		return p.checkSD(ctx, snap)
+	}
+	return nil
+}
+
+// checkSD verifies the declarative bundle is still what its SchemaDefinition
+// would emit now. snap may be nil (cheap checks only).
+func (p *applyPrecheck) checkSD(ctx context.Context, snap *drift.Snapshot) error {
+	sdName := p.bundle.Labels[keystonev1alpha1.LabelSchemaDefinition]
+	var sd keystonev1alpha1.SchemaDefinition
+	if err := p.r.Get(ctx, types.NamespacedName{Namespace: p.bundle.Namespace, Name: sdName}, &sd); err != nil {
+		if apierrors.IsNotFound(err) {
+			return &stalePlanError{fmt.Sprintf("SchemaDefinition %q no longer exists", sdName)}
+		}
+		return fmt.Errorf("load SchemaDefinition %q: %w", sdName, err)
+	}
+	if want, have := specFingerprint(&sd.Spec), p.bundle.Annotations[keystonev1alpha1.AnnotationSDFingerprint]; have != want {
+		return &stalePlanError{fmt.Sprintf("bundle fingerprint %q != SchemaDefinition %q spec fingerprint %q", have, sdName, want)}
+	}
+	if sd.Spec.SchemaRef == "" {
+		// Selector SD: the plan is canonical across schemas, so it can't be
+		// recomputed per schema. The bundle must be the SD's current one.
+		if sd.Status.CurrentBundleRef != p.bundle.Name {
+			return &stalePlanError{fmt.Sprintf("bundle is not SchemaDefinition %q current bundle (%q)", sdName, sd.Status.CurrentBundleRef)}
+		}
+		return nil
+	}
+	if snap == nil {
+		return nil
+	}
+	plan, err := declarative.Diff(snap, &sd.Spec)
+	if err != nil {
+		var destructive *declarative.ErrDestructiveRefused
+		if errors.As(err, &destructive) {
+			return &stalePlanError{fmt.Sprintf("plan now refused as destructive: %v", err)}
+		}
+		return fmt.Errorf("re-diff SchemaDefinition %q: %w", sdName, err)
+	}
+	if want := fmt.Sprintf("%s-%s", sd.Name, planContentHash(plan)); want != p.bundle.Name {
+		return &stalePlanError{fmt.Sprintf("live schema no longer matches the plan: SchemaDefinition now plans %d statement(s) as %q, bundle is %q", len(plan.Statements), want, p.bundle.Name)}
+	}
+	return nil
+}
+
+// advanceBaseline moves the drift baseline to the post-apply structure when
+// the schema was clean (pre-apply hash == stored baseline) going in. Without
+// this the DriftController reports Keystone's own change as drift. A schema
+// that already drifted keeps its baseline so the drift stays visible.
+// Best-effort: the SQL has committed.
+func (p *applyPrecheck) advanceBaseline(ctx context.Context, version string, logger logr.Logger) {
+	if p.preHash == "" {
+		return
+	}
+	base, err := drift.ReadBaseline(ctx, p.pool, p.schema, drift.BaselineKindStructure)
+	if err != nil || base == nil || base.Hash != p.preHash {
+		// No baseline yet (DriftController records the first observation) or
+		// pre-existing drift: leave it.
+		if err != nil {
+			logger.V(1).Info("baseline advance skipped", "err", err.Error())
+		}
+		return
+	}
+	snap, err := drift.NewInspector(p.pool).Inspect(ctx, p.schema)
+	if err != nil {
+		logger.Info("baseline advance: post-apply inspect failed", "err", err.Error())
+		return
+	}
+	hash, err := drift.Hash(snap)
+	if err != nil {
+		logger.Info("baseline advance: hash failed", "err", err.Error())
+		return
+	}
+	if hash == base.Hash {
+		return
+	}
+	if err := drift.WriteBaseline(ctx, p.pool, p.schema, drift.BaselineKindStructure, hash, "migration:"+version); err != nil {
+		logger.Info("baseline advance: write baseline failed", "err", err.Error())
+		return
+	}
+	if err := drift.WriteSnapshot(ctx, p.pool, p.schema, snap); err != nil {
+		logger.Info("baseline advance: write snapshot failed", "err", err.Error())
+	}
+}
+
+// markStale aborts an execution whose declarative plan went stale before any
+// SQL ran. No tracking-table row exists, so a later fresh bundle is unaffected.
+func (r *MigrationExecutionReconciler) markStale(
+	ctx context.Context,
+	exec *keystonev1alpha1.MigrationExecution,
+	cause *stalePlanError,
+) (ctrl.Result, error) {
+	patch := client.MergeFrom(exec.DeepCopy())
+	exec.Status.ObservedGeneration = exec.Generation
+	exec.Status.Phase = keystonev1alpha1.ExecutionPhaseAborted
+	now := metav1.Now()
+	exec.Status.CompletionTime = &now
+	exec.Status.FailureMessage = truncate(cause.Error(), 4096)
+	exec.Status.Conditions = conditions.Set(exec.Status.Conditions,
+		keystonev1alpha1.ConditionTypeReady, metav1.ConditionFalse,
+		reasonStaleDeclarativePlan, cause.Error(), exec.Generation)
+	exec.Status.Conditions = conditions.ClearProgressing(exec.Status.Conditions, exec.Generation)
+	if err := r.Status().Patch(ctx, exec, patch); err != nil {
+		return ctrl.Result{}, fmt.Errorf("patch stale status: %w (cause: %v)", err, cause)
+	}
+	if r.Recorder != nil {
+		r.Recorder.Eventf(exec, corev1.EventTypeWarning, reasonStaleDeclarativePlan, "%s", cause.Error())
+	}
+	r.emitAudit(ctx, exec, "abort", reasonStaleDeclarativePlan+": "+cause.Error(), "success")
+	return ctrl.Result{}, nil
+}

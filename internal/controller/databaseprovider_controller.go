@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,7 +48,7 @@ import (
 type DatabaseProviderReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Pools    *pg.PoolCache
 
 	SystemNamespace string
@@ -99,7 +98,7 @@ func (r *DatabaseProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return r.markCredsNotReady(ctx, &provider, "SecretNotFound",
-				fmt.Errorf("Secret %s/%s not found", r.SystemNamespace, secretName))
+				fmt.Errorf("secret %s/%s not found", r.SystemNamespace, secretName))
 		}
 		return ctrl.Result{}, err
 	}
@@ -114,11 +113,11 @@ func (r *DatabaseProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 	if _, ok := sec.Data[userKey]; !ok {
 		return r.markCredsNotReady(ctx, &provider, "MissingUsernameKey",
-			fmt.Errorf("Secret missing key %q", userKey))
+			fmt.Errorf("secret missing key %q", userKey))
 	}
 	if _, ok := sec.Data[passKey]; !ok {
 		return r.markCredsNotReady(ctx, &provider, "MissingPasswordKey",
-			fmt.Errorf("Secret missing key %q", passKey))
+			fmt.Errorf("secret missing key %q", passKey))
 	}
 
 	// Rotation detection: current Secret ResourceVersion differs
@@ -280,7 +279,7 @@ func (r *DatabaseProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.SystemNamespace = "keystone-system"
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-databaseprovider")
+		r.Recorder = eventRecorderFor(mgr, "keystone-databaseprovider")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&keystonev1alpha1.DatabaseProvider{},

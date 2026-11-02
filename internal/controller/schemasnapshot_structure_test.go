@@ -37,7 +37,7 @@ func driftSnapshotWithRLS() *drift.Snapshot {
 		Policies: []drift.PolicyShape{{
 			Name: "tenant_isolation", Table: "messages", Command: "ALL",
 			Permissive: true,
-			Roles:      []string{"downstream-service_app"},
+			Roles:      []string{"downstream_app"},
 			Using:      "tenant_id = current_tenant()",
 			WithCheck:  "tenant_id = current_tenant()",
 		}},
@@ -77,7 +77,7 @@ func TestStructuralSnapshotFromDrift_CarriesRLS(t *testing.T) {
 	want := keystonev1alpha1.SnapshotPolicy{
 		Name: "tenant_isolation", Table: "messages", Command: "ALL",
 		Permissive: true,
-		Roles:      []string{"downstream-service_app"},
+		Roles:      []string{"downstream_app"},
 		Using:      "tenant_id = current_tenant()",
 		WithCheck:  "tenant_id = current_tenant()",
 	}
@@ -85,8 +85,8 @@ func TestStructuralSnapshotFromDrift_CarriesRLS(t *testing.T) {
 		p.Permissive != want.Permissive || p.Using != want.Using || p.WithCheck != want.WithCheck {
 		t.Errorf("policy = %+v, want %+v", p, want)
 	}
-	if len(p.Roles) != 1 || p.Roles[0] != "downstream-service_app" {
-		t.Errorf("Roles = %v, want [downstream-service_app]", p.Roles)
+	if len(p.Roles) != 1 || p.Roles[0] != "downstream_app" {
+		t.Errorf("Roles = %v, want [downstream_app]", p.Roles)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestStructuralSnapshotFromDrift_NoAliasing(t *testing.T) {
 	if out.Tables[0].RLSForced == nil || !*out.Tables[0].RLSForced {
 		t.Error("RLSForced aliases the drift snapshot; a later write reached the captured CR")
 	}
-	if out.Policies[0].Roles[0] != "downstream-service_app" {
+	if out.Policies[0].Roles[0] != "downstream_app" {
 		t.Errorf("policy Roles alias the drift snapshot; got %q", out.Policies[0].Roles[0])
 	}
 }
@@ -277,7 +277,7 @@ func TestSchemaSnapshot_PreRLSArchiveStillAdmissible(t *testing.T) {
 		"metadata": map[string]interface{}{
 			"namespace": "keystone-system", "name": "archived-pre-rls",
 		},
-		"spec": map[string]interface{}{"schemaRef": "downstream-service-public"},
+		"spec": map[string]interface{}{"schemaRef": "downstream-public"},
 	}}
 	if err := k8s.Create(ctx, obj); err != nil {
 		t.Fatalf("create archived snapshot: %v", err)
@@ -359,7 +359,7 @@ func TestSchemaSnapshot_RLSEraArchiveGainsNoObjects(t *testing.T) {
 		"metadata": map[string]interface{}{
 			"namespace": "keystone-system", "name": "archived-rls-era",
 		},
-		"spec": map[string]interface{}{"schemaRef": "downstream-service-public"},
+		"spec": map[string]interface{}{"schemaRef": "downstream-public"},
 	}}
 	if err := k8s.Create(ctx, obj); err != nil {
 		t.Fatalf("create archived snapshot: %v", err)
@@ -445,7 +445,7 @@ func TestSchemaSnapshot_TriggerWithoutForEachRowIsRejected(t *testing.T) {
 		"metadata": map[string]interface{}{
 			"namespace": "keystone-system", "name": "trigger-missing-scope",
 		},
-		"spec": map[string]interface{}{"schemaRef": "downstream-service-public"},
+		"spec": map[string]interface{}{"schemaRef": "downstream-public"},
 	}}
 	if err := k8s.Create(ctx, obj); err != nil {
 		t.Fatalf("create snapshot: %v", err)

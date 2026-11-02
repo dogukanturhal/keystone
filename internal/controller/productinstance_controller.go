@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,16 +32,18 @@ import (
 // work; this controller is the orchestrator.
 //
 // State machine:
-//   Pending → Provisioning (children created) →
-//   Migrating (waits for child resources Ready + initial migrations) →
-//   ConfiguringAuth (Phase 4.1 — SpiceDB tuples) →
-//   RegisteringRoutes (Phase 4.1 — APISIX) →
-//   Active.
+//
+//	Pending → Provisioning (children created) →
+//	Migrating (waits for child resources Ready + initial migrations) →
+//	ConfiguringAuth (Phase 4.1 — SpiceDB tuples) →
+//	RegisteringRoutes (Phase 4.1 — APISIX) →
+//	Active.
+//
 // Failure at any phase → Failed; user can fix the spec and re-reconcile.
 type ProductInstanceReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 
 	// AuditLogger appends tamper-evident entries on phase transitions.
 	AuditLogger     *audit.Logger
@@ -74,7 +75,7 @@ func (r *ProductInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.Update(ctx, &instance); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	// Resolve the ProductDefinition (cluster-scoped).
@@ -385,7 +386,7 @@ func (r *ProductInstanceReconciler) fail(
 
 func (r *ProductInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-productinstance")
+		r.Recorder = eventRecorderFor(mgr, "keystone-productinstance")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&keystonev1alpha1.ProductInstance{},
@@ -414,10 +415,10 @@ func substituteTokens(tmpl string, inst *keystonev1alpha1.ProductInstance, prod 
 // detection in the postgres package).
 func pgIdentValid(name string) error {
 	for i, r := range name {
-		if i == 0 && !(r == '_' || (r >= 'a' && r <= 'z')) {
+		if i == 0 && r != '_' && (r < 'a' || r > 'z') {
 			return fmt.Errorf("invalid PG identifier %q: must start with [a-z_]", name)
 		}
-		if !(r == '_' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+		if r != '_' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
 			return fmt.Errorf("invalid PG identifier %q: contains %q", name, r)
 		}
 	}

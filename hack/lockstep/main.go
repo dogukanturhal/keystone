@@ -11,7 +11,7 @@
 // config/rbac/tenant_enroller_clusterrole.yaml but did NOT add the
 // equivalent helm template. Every chart-based install (every Argo
 // Application in the org) silently shipped the SDK code without its
-// supporting RBAC. Caught when example-service phase-2b MR3 tried to bind
+// supporting RBAC. Caught when falcon-id phase-2b MR3 tried to bind
 // the missing ClusterRole and got "NotFound" at apply time. v0.1.44
 // shipped the missing template; this lockstep check exists to make
 // the same class of gap impossible to merge again.

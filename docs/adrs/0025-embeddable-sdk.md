@@ -118,7 +118,7 @@ imports internal packages (which Go allows from within the same
 module). This is fine for the monorepo model — internal's "don't
 import externally" invariant is preserved, while intra-module
 consumption keeps the SDK thin. A future split into a separate
-module (`github.com/hexxlock/keystone-sdk`) would inherit this
+module (`github.com/dogukanturhal/keystone-sdk`) would inherit this
 code by git submodule / go replace — postponed until there's
 concrete external demand.
 

@@ -7,7 +7,7 @@ Apply lifecycle, and remain rollback-safe across multi-tenant
 deployments.
 
 The 5 standards below are mandatory for tier-1 deployments. Each was
-distilled from real findings on the example-service v0.1.13 e2e bundle that
+distilled from real findings on the falcon-id v0.1.13 e2e bundle that
 landed today (2026-05-02). Skip any one and the linter rejects the
 bundle at admission via the `MigrationBundleValidator` webhook OR the
 `SchemaPolicy` analyzer flags it post-merge.
@@ -142,8 +142,8 @@ is:
 
   - For tenant `acme-corp`'s control schema, `search_path = acme_corp,
     pg_catalog`.
-  - For example-service-public, `search_path = public, pg_catalog`.
-  - For example-service-control-public, also `public` (it's in a different
+  - For falcon-id-public, `search_path = public, pg_catalog`.
+  - For falcon-id-control-public, also `public` (it's in a different
     DATABASE so `public` doesn't collide).
 
 Hardcoding `public.` defeats this. A single migration file is then
@@ -215,12 +215,12 @@ silently failing on a missing file.
 
 ## CI integration
 
-Example Service's `hack/sql-lint` (added in example-service !97 after the 2026-05-01
+Falcon-ID's `hack/sql-lint` (added in falcon-id !97 after the 2026-05-01
 oauth_client_columns whitespace bug) checks all 5 standards above
 against every migration in the project. Run locally before commit:
 
 ```bash
-make sql-lint        # in example-service; lint output is human-readable
+make sql-lint        # in falcon-id; lint output is human-readable
 ```
 
 Keystone's analyzer runs cluster-side against every MigrationBundle
@@ -278,8 +278,8 @@ make sql-lint
 keystonectl sum migrations
 
 # 4. Commit + open MR.
-git add migrations && git commit -m "feat(example-service): backfill users.tier" && git push
+git add migrations && git commit -m "feat(falcon-id): backfill users.tier" && git push
 ```
 
-The MR template in example-service pre-fills the migration checklist; check
+The MR template in falcon-id pre-fills the migration checklist; check
 each item before marking ready-for-review.

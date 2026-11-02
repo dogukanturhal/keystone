@@ -245,11 +245,11 @@ func (a *S3Archiver) Archive(ctx context.Context, batch []keystonev1alpha1.Audit
 			ContentType:     "application/gzip",
 			ContentEncoding: "gzip",
 			UserMetadata: map[string]string{
-				"sha256":         hexHash,
-				"first-sequence": fmt.Sprintf("%d", first),
-				"last-sequence":  fmt.Sprintf("%d", last),
-				"last-hash":      lastHash,
-				"entry-count":    fmt.Sprintf("%d", len(sorted)),
+				"sha256":                  hexHash,
+				"first-sequence":          fmt.Sprintf("%d", first),
+				"last-sequence":           fmt.Sprintf("%d", last),
+				"last-hash":               lastHash,
+				"entry-count":             fmt.Sprintf("%d", len(sorted)),
 				"keystone-archive-schema": "ecs.v1.gzip.jsonl",
 			},
 		})
@@ -288,7 +288,8 @@ func readAllArchive(r io.Reader) ([]keystonev1alpha1.AuditEntrySpec, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gzip open: %w", err)
 	}
-	defer gr.Close()
+	// gzip integrity errors are reported by Decode/Read, not by Close.
+	defer func() { _ = gr.Close() }()
 	dec := json.NewDecoder(gr)
 	var out []keystonev1alpha1.AuditEntrySpec
 	for dec.More() {

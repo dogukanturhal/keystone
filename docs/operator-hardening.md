@@ -284,7 +284,7 @@ The tag pipeline:
 4. Self-tests with `cosign verify --key=cosign.pub` (derived from
    `cosign public-key --key=$COSIGN_PRIVATE_KEY` so verify MUST
    succeed if sign succeeded)
-5. Bumps the GitOps repository release tag
+5. Bumps the the GitOps repository release tag
 
 If verify-signature fails, the new image was signed with the new key
 but the OLD key is still in the policy from before Step 3 finished —

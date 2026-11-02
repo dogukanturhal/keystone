@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -54,7 +53,7 @@ import (
 type AuditEntryRetentionController struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 
 	// Archiver is the cached backend. Built lazily each tick from
 	// AuditLog.Spec.Archive — operators can flip backends or rotate
@@ -178,12 +177,11 @@ func (c *AuditEntryRetentionController) runOnce(ctx context.Context, logger logr
 	// Re-arm the dormant log line if we ever go inactive again.
 	c.loggedDormant = false
 
-	// The admission webhook refuses to delete an entry that is not yet
-	// expired, so it and this loop must compute the identical cutoff —
-	// a disagreement of one second rejects this controller's own
-	// deletes and entries pile up in etcd. Both call RetentionCutoff.
 	retention := alog.Spec.RetentionDays
-	cutoff := keystonev1alpha1.RetentionCutoff(retention, c.now())
+	if retention <= 0 {
+		retention = 2555 // matches kubebuilder default
+	}
+	cutoff := c.now().Add(-time.Duration(retention) * 24 * time.Hour)
 
 	// 2. List candidates. Cluster-wide; AuditEntries are namespaced
 	// (in the system namespace) but we list-all so a future change
@@ -447,7 +445,7 @@ func (c *AuditEntryRetentionController) resolveArchiver(
 	ak, ok1 := sec.Data[akKey]
 	sk, ok2 := sec.Data[skKey]
 	if !ok1 || !ok2 || len(ak) == 0 || len(sk) == 0 {
-		return fmt.Errorf("Secret %s/%s missing key %q or %q",
+		return fmt.Errorf("secret %s/%s missing key %q or %q",
 			c.SystemNamespace, secretName, akKey, skKey)
 	}
 
@@ -489,7 +487,7 @@ func (c *AuditEntryRetentionController) SetupWithManager(mgr ctrl.Manager) error
 		c.SystemNamespace = "keystone-system"
 	}
 	if c.Recorder == nil {
-		c.Recorder = mgr.GetEventRecorderFor("keystone-audit-retention")
+		c.Recorder = eventRecorderFor(mgr, "keystone-audit-retention")
 	}
 	return mgr.Add(manager.RunnableFunc(c.Start))
 }

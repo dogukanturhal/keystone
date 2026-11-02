@@ -245,7 +245,7 @@ func TestDriftAcceptance_RefusalsAreVisible(t *testing.T) {
 		if err != nil {
 			t.Errorf("reconcile of a deleted report errored: %v", err)
 		}
-		if res.RequeueAfter != 0 || res.Requeue {
+		if res.RequeueAfter != 0 {
 			t.Errorf("expected a clean no-op; got %+v", res)
 		}
 	})

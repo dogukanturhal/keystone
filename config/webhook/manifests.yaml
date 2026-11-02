@@ -51,46 +51,6 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-keystone-hexxlock-io-v1alpha1-productdefinition
-  failurePolicy: Fail
-  name: vproductdefinition.kb.io
-  rules:
-  - apiGroups:
-    - keystone.hexxlock.io
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - productdefinitions
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /validate-keystone-hexxlock-io-v1alpha1-productinstance
-  failurePolicy: Fail
-  name: vproductinstance.kb.io
-  rules:
-  - apiGroups:
-    - keystone.hexxlock.io
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - productinstances
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
       path: /validate-keystone-hexxlock-io-v1alpha1-schemadefinition
   failurePolicy: Fail
   name: vschemadefinition.kb.io

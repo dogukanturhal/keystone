@@ -31,55 +31,9 @@ const (
 	IsolationModeSilo IsolationMode = "silo"
 )
 
-// IsImplemented reports whether the TenancyController can actually
-// provision this isolation mode today.
-//
-// Only bridge is implemented. The CRD enum accepts all three modes for
-// forward compatibility, but ProductInstance reconciliation materialises
-// exactly one LogicalDatabase per ProductDatabase with schema-per-tenant
-// naming — the bridge topology — regardless of what was declared.
-//
-// This matters beyond tidiness: a ProductDefinition declaring silo for a
-// regulated workload would otherwise be provisioned onto a SHARED
-// database with no error and no status condition, so the operator would
-// silently deliver weaker data isolation than the resource requested.
-// Admission rejects unimplemented modes rather than accepting a
-// guarantee the controller cannot keep.
-//
-// When pool or silo land, add them here and to the admission tests; the
-// webhook and controller read this single source of truth.
-func (m IsolationMode) IsImplemented() bool {
-	return m == IsolationModeBridge
-}
-
-// ImplementedIsolationModes lists the modes IsImplemented accepts, for
-// use in error messages.
-func ImplementedIsolationModes() []string {
-	return []string{string(IsolationModeBridge)}
-}
-
-// ResolveIsolation returns the isolation mode that would actually govern
-// a ProductDatabase, applying the documented precedence:
-//
-//	ProductInstance.spec.isolationOverride  (highest)
-//	ProductDatabase.isolation
-//	ProductDefinition.spec.defaultIsolation
-//	bridge                                  (lowest / implicit default)
-//
-// Empty values are treated as "not specified" and fall through. Callers
-// pass "" for override when no ProductInstance is in scope.
-func ResolveIsolation(override, perDatabase, productDefault IsolationMode) IsolationMode {
-	for _, candidate := range []IsolationMode{override, perDatabase, productDefault} {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return IsolationModeBridge
-}
-
 // ProductDatabase describes one logical database the product needs.
-// A product may declare multiple databases (e.g. a core database
-// plus a separate financials database).
+// A product may declare multiple databases (e.g. example_suite +
+// hexxlock_financials for ExampleSuite).
 type ProductDatabase struct {
 	// Key is a stable identifier the product code uses to refer to
 	// this database (e.g. "core", "billing"). Required so the controller
@@ -92,7 +46,7 @@ type ProductDatabase struct {
 
 	// Name is the actual PostgreSQL database name template. Tokens
 	// {{tenantID}} and {{productSlug}} are substituted by the
-	// TenancyController at instantiation. Example: "example_suite_{{tenantID}}".
+	// TenancyController at instantiation. Example: "example_{{tenantID}}".
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=63

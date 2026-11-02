@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -53,7 +52,7 @@ import (
 type DriftController struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Pools    *pg.PoolCache
 
 	// CheckInterval is how often the periodic loop runs. Defaults to
@@ -537,12 +536,12 @@ func (c *DriftController) resolveCredentials(ctx context.Context, p *keystonev1a
 	}
 	u, ok := sec.Data[userKey]
 	if !ok || len(u) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			c.SystemNamespace, ref.SecretName, userKey)
 	}
 	pw, ok := sec.Data[passKey]
 	if !ok || len(pw) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			c.SystemNamespace, ref.SecretName, passKey)
 	}
 	return resolvedCreds{Username: string(u), Password: string(pw)}, nil
@@ -556,7 +555,7 @@ func (c *DriftController) SetupWithManager(mgr ctrl.Manager) error {
 		c.SystemNamespace = "keystone-system"
 	}
 	if c.Recorder == nil {
-		c.Recorder = mgr.GetEventRecorderFor("keystone-drift")
+		c.Recorder = eventRecorderFor(mgr, "keystone-drift")
 	}
 	return mgr.Add(manager.RunnableFunc(c.Start))
 }

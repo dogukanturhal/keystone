@@ -27,7 +27,7 @@ meaningful time on the project each week.
 3. No objection from other maintainers within 7 days of the nomination
    thread
 
-Stepping down is by email to `maintainers@hexxlock.com` — no drama, no
+Stepping down is by email to `dogukanturhal@hexxlock.com` — no drama, no
 reputation cost. Emeritus maintainers keep commit credit; their +1 on
 votes stops counting.
 
@@ -35,8 +35,8 @@ votes stops counting.
 
 | Name | Email | Role |
 |---|---|---|
-| Doğukan Turhal (`dogukanturhal`) | dogukanturhal@hexxlock.com | Project Lead |
-| HexxLock Platform Team | maintainers@hexxlock.com | Core maintainers |
+| Doğukan Turhal (`dogukanturhal`) | dogukanturhal@gmail.com | Project Lead |
+| HexxLock Platform Team | dogukanturhal@hexxlock.com | Core maintainers |
 
 A live list is mirrored in `MAINTAINERS` at the repo root.
 

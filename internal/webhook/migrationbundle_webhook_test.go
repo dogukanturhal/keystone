@@ -13,9 +13,9 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
-	"github.com/dogukanturhal/keystone-sdk/go/migration"
 	"github.com/dogukanturhal/keystone-sdk/go/analyze"
+	"github.com/dogukanturhal/keystone-sdk/go/migration"
+	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	policycel "github.com/dogukanturhal/keystone/internal/policy/cel"
 )
 
@@ -222,6 +222,9 @@ func TestMigrationBundleValidator_ImmutabilityCheck(t *testing.T) {
 	}
 	// New bundle resolves the ConfigMap with a different hash.
 	new := old.DeepCopy()
+	// A real spec edit (unchanged-spec updates are metadata-only and
+	// external ConfigMap drift belongs to the controller).
+	new.Spec.MaxConcurrentExecutions = 1
 
 	_, err := v.ValidateUpdate(context.Background(), old, new)
 	if err == nil {
@@ -457,8 +460,8 @@ func TestMigrationBundleValidator_IntegrityMalformedRejected(t *testing.T) {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "keystone-system", Name: "cm-int-malformed"},
 		Data: map[string]string{
-			"001_init.up.sql":        "CREATE TABLE demo (id uuid PRIMARY KEY);",
-			migration.SumFilename:    "not a sum file",
+			"001_init.up.sql":     "CREATE TABLE demo (id uuid PRIMARY KEY);",
+			migration.SumFilename: "not a sum file",
 		},
 	}
 	v := &MigrationBundleValidator{

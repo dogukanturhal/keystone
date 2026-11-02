@@ -204,5 +204,5 @@ production.
   dashboards consumed by ADR 0014 alerts.
 - [`docs/adrs/0014-slo-framework-multi-window-burn-rate.md`](adrs/0014-slo-framework-multi-window-burn-rate.md)
   — SLO definition + burn-rate alert math.
-- the internal roadmap — Phase 12
+- [`docs/roadmap.md`](roadmap.md) — Phase 12
   performance-work scope.

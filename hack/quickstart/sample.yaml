@@ -1,0 +1,73 @@
+# Quickstart custom resources: one provider, one database, one schema and a
+# versioned migration. Apply after the operator and PostgreSQL are running.
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: DatabaseProvider
+metadata:
+  name: quickstart-pg
+spec:
+  engine: postgresql
+  host: postgres.keystone-system.svc.cluster.local
+  port: 5432
+  maintenanceDatabase: postgres
+  sslMode: require
+  adminCredentialsRef:
+    secretName: quickstart-pg-admin
+    usernameKey: username
+    passwordKey: password
+  poolMaxConns: 4
+---
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: LogicalDatabase
+metadata:
+  name: quickstart
+  namespace: keystone-system
+spec:
+  name: quickstart
+  clusterRef: local
+  providerRef: quickstart-pg
+  ownerRole: quickstart_owner
+  deletionPolicy: Retain
+---
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: DatabaseSchema
+metadata:
+  name: app
+  namespace: keystone-system
+  labels:
+    module: app
+spec:
+  name: app
+  logicalDatabaseRef: quickstart
+  ownerRole: quickstart_owner
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-v1-sql
+  namespace: keystone-system
+data:
+  001_create_notes.up.sql: |
+    CREATE TABLE IF NOT EXISTS app.notes (
+      id   bigserial PRIMARY KEY,
+      body text NOT NULL
+    );
+  002_add_created_at.up.sql: |
+    ALTER TABLE app.notes
+      ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+---
+apiVersion: keystone.hexxlock.io/v1alpha1
+kind: MigrationBundle
+metadata:
+  name: app-v1
+  namespace: keystone-system
+spec:
+  version: v1
+  strategy: versioned
+  source:
+    type: ConfigMap
+    configMapRef:
+      name: app-v1-sql
+      filePattern: "*.up.sql"
+  schemaSelector:
+    matchLabels:
+      module: app

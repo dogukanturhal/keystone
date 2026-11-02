@@ -68,7 +68,7 @@ func TestComputeSelfHash_ChangesWithSpec(t *testing.T) {
 		{"name", func(s *keystonev1alpha1.AuditEntrySpec) { s.ResourceRef.Name = "mb-v2" }},
 		{"reason", func(s *keystonev1alpha1.AuditEntrySpec) { s.Reason = "Different" }},
 		{"timestamp", func(s *keystonev1alpha1.AuditEntrySpec) {
-			s.Timestamp = metav1.NewTime(s.Timestamp.Time.Add(time.Second))
+			s.Timestamp = metav1.NewTime(s.Timestamp.Add(time.Second))
 		}},
 		{"prevHash", func(s *keystonev1alpha1.AuditEntrySpec) { s.PrevHash = strings.Repeat("a", 64) }},
 	} {

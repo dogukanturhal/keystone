@@ -19,14 +19,18 @@ New runbook guidelines:
 | Runbook | Symptom |
 |---|---|
 | [runbook.md](../runbook.md) | Master catalog — covers reconcile errors, drift detection, pgroll stalls, ProductInstance provisioning, manager crashloop |
+| [ownership-drift.md](ownership-drift.md) | LogicalDatabase `OwnershipDrift=True` / objects owned by an unexpected role |
 
 ## Planned (roadmap)
 
 The following runbooks are committed for Phase 12+ but not yet
-written. Track progress in the internal roadmap.
+written. Track progress in [`roadmap.md`](../roadmap.md).
 
 | Runbook | Trigger |
 |---|---|
+| `downgrade.md` | Roll back from keystone-manager vN to vN-1 |
+| `dr-drill.md` | Quarterly disaster-recovery exercise (restore from etcd + PG backup) |
+| `slo-burn.md` | Multi-window burn-rate alert fired — see ADR 0014 |
 | `credential-rotation.md` | Rotate admin credentials without a manager restart |
 | `tenant-offboard.md` | Remove a tenant's databases + schemas cleanly |
 

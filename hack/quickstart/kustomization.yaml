@@ -1,0 +1,32 @@
+# Local quickstart bundle: the operator (config/default) patched for a
+# single-node kind cluster, plus a throwaway PostgreSQL. Test clusters only.
+#
+#   kubectl apply --server-side -k config/crd     # CRDs first
+#   kubectl apply -k hack/quickstart
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../config/default
+  - postgres.yaml
+images:
+  # Built locally with `docker build -t keystone-manager:dev .` and loaded
+  # into kind with `kind load docker-image`.
+  - name: ghcr.io/dogukanturhal/keystone-manager
+    newName: keystone-manager
+    newTag: dev
+patches:
+  - target:
+      kind: Deployment
+      name: keystone-manager
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      # The validating webhooks need a serving certificate (cert-manager).
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --enable-webhooks=false
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts
+      - op: remove
+        path: /spec/template/spec/volumes

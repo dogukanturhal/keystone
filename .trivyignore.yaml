@@ -29,40 +29,50 @@
 #   4. If not, extend expired_at with the date checked.
 
 vulnerabilities:
-  # --- kubectl v1.36.3 (vendors golang.org/x/net v0.49.0; fixed in 0.55.0)
-  - id: CVE-2026-56852
+  # --- kubectl v1.37.1 (newest release; vendors x/text v0.40.0, built on go1.26.8)
+  - id: CVE-2026-56851
+    paths:
+      - usr/local/bin/kubectl
+    statement: >-
+      golang.org/x/text v0.40.0 vendored in the upstream kubectl v1.37.1
+      binary; fixed in v0.41.0. v1.37.1 is the newest kubectl release
+      (2026-10-29), so bumping our ARG cannot move it. Clears when upstream
+      ships a release built against x/text >= 0.41.0.
+    expired_at: 2026-11-30
+  - id: CVE-2026-111943
+    paths:
+      - usr/local/bin/kubectl
+    statement: >-
+      Go stdlib in the upstream kubectl v1.37.1 binary (go1.26.8); fixed in
+      go1.26.10 / 1.27.3. Newest release as of 2026-10-29. keystonectl is
+      built by us and moves to go1.26.10 in Dockerfile.tools, so only the
+      kubectl path is excepted.
+    expired_at: 2026-11-30
+  - id: CVE-2026-78667
     paths:
       - usr/local/bin/kubectl
       - usr/local/bin/cosign
     statement: >-
-      golang.org/x/text vendored by upstream cosign. Re-checked 2026-09-10
-      per the procedure above: kubectl v1.37.0 now vendors x/text v0.40.0
-      and is CLEAR, so the kubectl half of this entry is gone. cosign
-      v3.1.3 -- the newest release -- still vendors v0.38.0, below the
-      >= 0.39.0 that carries the fix. Verified with `go version -m` on the
-      actual v3.1.3 binary, not from release notes.
-    expired_at: 2026-11-15
-
-  # --- cosign v3.1.2 (go1.26.4; CVE-2026-39822 fixed in 1.26.5)
-  - id: CVE-2026-39822
+      Go stdlib in upstream binaries (cosign v3.1.3 on go1.26.4, kubectl
+      v1.37.1 on go1.26.8); fix lands in go1.26.9 / 1.27.2. Checked
+      2026-10-15: no rebuilt release exists. Clears when upstream ships on
+      go1.26.9+.
+    expired_at: 2026-11-20
+  - id: CVE-2026-78669
     paths:
+      - usr/local/bin/kubectl
       - usr/local/bin/cosign
     statement: >-
-      Go stdlib in the upstream cosign binary; the fix lands in go1.26.5.
-      Re-checked 2026-09-10: cosign v3.1.3 -- the newest release -- is
-      STILL built on go1.26.4, so upgrading gains nothing here. Verified
-      by `go version -m` on the v3.1.3 binary. Clears when sigstore ships
-      a release built on go1.26.5+.
-    expired_at: 2026-11-15
-  # --- cosign v3.1.2 (vendors google.golang.org/grpc v1.82.0; fixed in 1.82.1)
-  - id: GHSA-hrxh-6v49-42gf
+      Go stdlib (go1.26.4 / go1.26.8) and golang.org/x/net (cosign v0.56.0,
+      kubectl v0.57.0; fixed in 0.60.0) vendored by the upstream binaries.
+      Checked 2026-10-15: newest cosign v3.1.3 and kubectl v1.37.1 are not
+      rebuilt. Clears when upstream ships on go1.26.9+ / x/net 0.60.0+.
+    expired_at: 2026-11-20
+  - id: CVE-2026-97031
     paths:
+      - usr/local/bin/kubectl
       - usr/local/bin/cosign
     statement: >-
-      google.golang.org/grpc vendored by upstream cosign; fix at 1.82.1.
-      Re-checked 2026-09-10: cosign v3.1.3 still vendors grpc v1.82.0, one
-      patch short. Verified by `go version -m` on the v3.1.3 binary. cosign
-      runs here only to verify signatures over HTTPS to Harbor; it does not
-      serve gRPC, and this class of CVE requires a server built with
-      xds.NewGRPCServer().
-    expired_at: 2026-11-15
+      Same go1.26.4 / go1.26.8 stdlib as CVE-2026-78667 above; fix in
+      go1.26.9 / 1.27.2. Checked 2026-10-15: no rebuilt release exists.
+    expired_at: 2026-11-20

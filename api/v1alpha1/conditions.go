@@ -133,6 +133,29 @@ const (
 	ConditionTypeBundleGenerated = "BundleGenerated"
 )
 
+// ConditionTypeOwnershipDrift reports whether objects in the managed schemas
+// of a LogicalDatabase are owned by someone other than spec.ownerRole. It is
+// informational: it never gates Ready and never sets Degraded.
+//   True    — reason=DriftDetected
+//   False   — reason ∈ {NoDrift, NoManagedSchemas}
+//   Unknown — reason ∈ {CheckFailed, OwnerRoleMissing}
+const ConditionTypeOwnershipDrift = "OwnershipDrift"
+
+// Reasons published on ConditionTypeOwnershipDrift.
+const (
+	ReasonOwnershipNoDrift          = "NoDrift"
+	ReasonOwnershipNoManagedSchemas = "NoManagedSchemas"
+	ReasonOwnershipDriftDetected    = "DriftDetected"
+	ReasonOwnershipCheckFailed      = "CheckFailed"
+	ReasonOwnershipOwnerRoleMissing = "OwnerRoleMissing"
+)
+
+// Values of spec.ownershipRemediation (DatabaseProvider, LogicalDatabase).
+const (
+	OwnershipRemediationReport                     = "Report"
+	OwnershipRemediationReassignFromConnectionRole = "ReassignFromConnectionRole"
+)
+
 // DriftReport condition types.
 const (
 	// ConditionTypeDetected reports that the live schema still diverges

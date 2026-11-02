@@ -110,6 +110,29 @@ type DatabaseProviderSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=64
 	PoolMaxConns int32 `json:"poolMaxConns,omitempty"`
+
+	// OwnershipRemediation controls what the LogicalDatabase controller does
+	// about objects in managed schemas that are not owned by the database's
+	// ownerRole.
+	//
+	//   Report                      — report only (condition, status, metrics).
+	//   ReassignFromConnectionRole  — also ALTER ... OWNER TO ownerRole for
+	//                                 drifted objects owned by this provider's
+	//                                 admin (connection) role. Objects owned by
+	//                                 other roles, RLS-unforced tables, views
+	//                                 and partition/inheritance children that
+	//                                 depend on RLS tables,
+	//                                 SECURITY DEFINER routines, owned
+	//                                 sequences and schemas stay report-only.
+	//
+	// Lives on the provider (not only on LogicalDatabase) because SDK
+	// enrolment overwrites realm LogicalDatabase specs wholesale. A
+	// LogicalDatabase may override it via its own spec.ownershipRemediation.
+	//
+	// +optional
+	// +kubebuilder:default=Report
+	// +kubebuilder:validation:Enum=Report;ReassignFromConnectionRole
+	OwnershipRemediation string `json:"ownershipRemediation,omitempty"`
 }
 
 // DatabaseProviderStatus reports observed connectivity.

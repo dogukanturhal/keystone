@@ -1,272 +1,165 @@
 # Keystone
 
-> Database lifecycle for tier-1 multi-tenant SaaS.
-> GitOps-native. Policy-gated. Zero-downtime.
+[![CI](https://github.com/dogukanturhal/keystone/actions/workflows/ci.yml/badge.svg)](https://github.com/dogukanturhal/keystone/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dogukanturhal/keystone/api.svg)](https://pkg.go.dev/github.com/dogukanturhal/keystone/api)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dogukanturhal/keystone/badge)](https://scorecard.dev/viewer/?uri=github.com/dogukanturhal/keystone)
 
-Keystone is a Kubernetes operator that owns the database lifecycle — schema
-migrations, tenant provisioning, staged multi-tenant rollouts, drift
-detection, and zero-downtime expand/contract — through declarative CRDs
-reconciled by GitOps.
+A Kubernetes operator that manages PostgreSQL schema migrations, tenant
+databases and drift detection through CRDs, so the database follows the same
+GitOps flow as the rest of your cluster.
 
-It is the open-source replacement for the homegrown `db-migrator` and
-`db-provisioner` services that previously powered the HexxLock platform.
+## Who it is for
 
-## Status
+Teams that run PostgreSQL for a multi-tenant SaaS on Kubernetes and are tired
+of migrations being a CI job with a database password in it. If you have one
+database and one service, Flyway or Atlas in a CI step is simpler. Keystone
+pays off when you have many databases or schemas, staged rollouts across
+tenant tiers, and a need to say who changed what and when.
 
-**Beta — in production use at HexxLock. The CRD API is not yet frozen.**
+## Features
 
-Fourteen controllers are implemented and reconciling: `LogicalDatabase`,
-`DatabaseSchema`, `DatabaseProvider`, `SchemaDefinition`, `SchemaSnapshot`,
-`MigrationBundle` (including staged rollout), `MigrationPlan`,
-`MigrationExecution`, `ProductInstance`, `DriftReport` and drift acceptance,
-`AuditLog`, `AuditEntry` retention, and CR TTL cleanup.
+Each item below exists in the code today.
 
-The following are declared in the API but **not** honored by any controller.
-They are release blockers, not roadmap items — the API currently accepts
-configuration it silently ignores.
+- **Declarative database topology.** `DatabaseProvider` (a PostgreSQL server
+  and its admin credentials), `LogicalDatabase` and `DatabaseSchema` create
+  and own the roles, databases, extensions and schemas. Deletion defaults to
+  `Retain`.
+- **Three migration strategies** on `MigrationBundle`: `versioned` (numbered
+  `*.up.sql` files), `declarative` (diff against a `SchemaDefinition`) and
+  `pgroll-expand-contract` (a subset of [pgroll](https://github.com/xataio/pgroll)
+  for zero-downtime changes).
+- **Plan, gate, apply.** A `MigrationPlan` is generated and linted before a
+  `MigrationExecution` runs it. Bundles can require approval.
+- **Staged rollouts.** `RolloutPolicy` and cluster tiers order a bundle
+  across targets (canary first), with wave parallelism inside a bundle.
+- **Lint and policy.** `SchemaPolicy` rules, including CEL expressions, and
+  admission webhooks for `MigrationBundle`, `SchemaDefinition` and
+  `AuditEntry`.
+- **Integrity checks.** Content hashes pin a bundle version to its SQL; a
+  `keystone.sum` file covers migration directories.
+- **Drift detection.** `DriftReport` compares live schemas with the declared
+  one, `SchemaSnapshot` records what was found, and ownership drift on
+  objects is reported on `LogicalDatabase`.
+- **Audit trail.** Hash-chained `AuditEntry` records, with optional export to
+  NATS JetStream or JSON on stdout.
+- **CLI tools.** `keystonectl` (author migrations from a desired schema,
+  inspect a database, scaffold bundles) and `keystoneadm` (audit backfill).
+- **Observability.** Prometheus metrics, OpenTelemetry tracing, a Helm chart
+  with alert rules and a ServiceMonitor.
 
-| Surface | State |
-|---|---|
-| `--role=agent`, hub-and-spoke multi-cluster | **Not implemented.** The flag is parsed and logged but never branched on. Every deployment runs as hub and dispatches all executions itself. |
-| `defaultIsolation` / `isolation` / `isolationOverride` (pool, bridge, silo) | **Not implemented.** See the warning below. |
-| `ClusterRegistration.status` | Never written. The resource is read only for rollout tier lookup. |
+## Quickstart (about 5 minutes)
 
-### Isolation modes
+Needs `docker`, `kind` and `kubectl` (1.27 or newer, for `-k` and
+server-side apply). The full walkthrough, with expected output, is in
+[docs/getting-started.md](docs/getting-started.md).
 
-> **Warning — do not rely on `isolation` for data segregation.** All three
-> modes are declared in the API and accepted by CRD enum validation, but no
-> controller reads them. Every `ProductInstance` is provisioned as **bridge**
-> (shared database, schema-per-tenant), including instances that declare
-> `silo`. A workload that requires database-per-tenant isolation for
-> compliance reasons is not getting it, and nothing in the status surface
-> says so.
+```sh
+git clone https://github.com/dogukanturhal/keystone && cd keystone
 
-See [`docs/roadmap.md`](docs/roadmap.md) for the phased delivery plan.
+# 1. cluster and operator image
+kind create cluster --name keystone
+docker build -t keystone-manager:dev .
+kind load docker-image keystone-manager:dev --name keystone
+
+# 2. CRDs, then the operator and a throwaway TLS-enabled PostgreSQL
+kubectl apply --server-side -k config/crd
+kubectl apply -k hack/quickstart
+kubectl -n keystone-system rollout status deploy/postgres deploy/keystone-manager
+
+# 3. a provider, a database, a schema and a migration
+kubectl apply -f hack/quickstart/sample.yaml
+kubectl -n keystone-system get logicaldatabase,databaseschema,migrationbundle
+
+# 4. look at the result
+kubectl -n keystone-system exec deploy/postgres -- \
+  psql -U postgres -d quickstart -c '\dt app.*'
+```
+
+The quickstart disables the admission webhooks (they need cert-manager) and
+uses a single replica. Do not use `hack/quickstart` outside a test cluster.
+
+## How it compares
+
+- **Flyway, Liquibase.** Libraries and CLIs you run from CI or an init
+  container. Keystone runs inside the cluster, reconciles continuously, and
+  also provisions databases, roles and schemas. If you want a tool and not an
+  operator, they are the better fit.
+- **[Atlas Operator](https://github.com/ariga/atlas-operator).** Closest in
+  spirit: declarative schema or versioned migrations applied from CRDs.
+  Atlas has a stronger schema diff engine and wide database support;
+  Keystone is PostgreSQL only and adds tenant tiers, staged rollouts, approval
+  gates and the audit chain.
+- **[SchemaHero](https://github.com/schemahero/schemahero).** Declarative,
+  Kubernetes-native table definitions. Keystone also supports plain SQL
+  migrations and expand/contract.
+- **[CloudNativePG](https://cloudnative-pg.io/).** Complementary: it runs the
+  PostgreSQL cluster, Keystone manages what is inside it. Point a
+  `DatabaseProvider` at a CloudNativePG service.
 
 ## Architecture
 
 ```
-                        ┌───────────────────────────┐
-                        │         Git (SSoT)        │
-                        │   keystone.hexxlock.io    │
-                        │   manifests + policies    │
-                        └────────────┬──────────────┘
-                                     │ ArgoCD (ApplicationSet, hub-and-spoke)
-                                     │
-        ┌────────────────────────────┼────────────────────────────┐
-        ▼                            ▼                            ▼
-┌──────────────┐          ┌─────────────────────┐        ┌──────────────────┐
-│  Hub cluster │          │ Workload cluster A  │        │ Workload cluster │
-│              │ status   │                     │        │ B, C, …          │
-│ • Planner    │◄─────────┤ • keystone-agent    │        │ • keystone-agent │
-│ • Policy DB  │  via Git │ • Kyverno admission │        │ • Kyverno        │
-│ • Drift      │          │ • Migration runner  │        │ • Migration      │
-│   detector   │          │   (pgroll engine)   │        │   runner         │
-└──────────────┘          └─────────────────────┘        └──────────────────┘
+ Git ──(Argo CD / Flux)──► CRs: DatabaseProvider, LogicalDatabase,
+                                DatabaseSchema, MigrationBundle, policies
+                                        │
+                              ┌─────────▼──────────┐
+                              │  keystone-manager  │  one Deployment, leader-elected
+                              │  controllers       │
+                              │  admission webhook │
+                              └───┬──────────┬─────┘
+          MigrationPlan ► MigrationExecution  │   DriftReport / SchemaSnapshot
+                                  │           │   AuditEntry ──► NATS / stdout
+                          ┌───────▼───────────▼──┐
+                          │   PostgreSQL server  │  admin credentials from a Secret
+                          └──────────────────────┘
 ```
 
-**The diagram above is the target architecture, not the shipped one.** The
-binary accepts `--role={hub,agent}` but does not branch on the value: every
-deployment runs as a hub and dispatches every migration execution itself.
-Cross-cluster agent dispatch is not implemented, and `--role=agent` silently
-behaves as `hub`. Today's rollout "tiers" are labels on logical clusters that
-share the hub. Status is intended to flow back through Git rather than direct
-cross-cluster API calls.
+## Status and limitations
 
-## Core CRDs
+Pre-1.0. The CRDs are `v1alpha1` and may change between releases; see
+[API_STABILITY.md](API_STABILITY.md). It has run in production at
+[HexxLock](https://hexxlock.com), the author's company, but there are no
+published third-party adopters yet.
 
-| Group / Kind                          | Purpose                                    |
-|---------------------------------------|--------------------------------------------|
-| `ClusterRegistration`                 | Registers a workload cluster (tier, region)|
-| `DatabaseProvider` → `Cluster` → `Shard` | Physical topology                       |
-| `LogicalDatabase` → `DatabaseSchema` → `SchemaRole` | Logical topology              |
-| `MigrationBundle` → `Plan` → `Execution` | Versioned and declarative migrations    |
-| `ProductDefinition` → `ProductInstance` | Tenant lifecycle (isolation modes declared but not enforced — see Status) |
-| `TenantAssignment`                    | Tenant → shard binding (consumed by router)|
-| `SchemaPolicy` + `RolloutPolicy`      | Lint rules + staged rollout (canary→paid) |
-| `DriftReport`                         | Hourly `pg_dump` diff against declared    |
+Things that are declared in the API but **not implemented**. Do not rely on
+them:
 
-## Licensing
+- **Isolation modes** (`defaultIsolation`, `isolation`, `isolationOverride`:
+  pool, bridge, silo). No controller reads them. Every `ProductInstance` is
+  provisioned as bridge (shared database, schema per tenant), including ones
+  that declare `silo`.
+- **`--role=agent` and hub-and-spoke multi-cluster.** The flag is parsed and
+  logged only; every deployment acts as the hub.
+- **`ClusterRegistration.status`** is never written.
 
-- **Operator and engine**: GNU Affero General Public License v3.0 or later
-  ([`LICENSE`](LICENSE)). The AGPL-3.0 closes the network-service loophole
-  exploited by hyperscalers — anyone offering Keystone as a managed service
-  must release their modifications. End users running Keystone for their
-  own workloads are not affected.
-- **CRD API types** (`api/`): Apache License 2.0 ([`api/LICENSE`](api/LICENSE)) — so clients, providers and controllers can import the types without inheriting AGPL.
-  Permissive so providers (Crossplane, Terraform, third-party integrations)
-  can build against the public API without inheriting AGPL.
+Other limits: PostgreSQL only (see
+[ADR 0003](docs/adrs/0003-postgresql-first-multi-engine-later.md)); the
+`pgroll` support is a subset of upstream
+([ADR 0013](docs/adrs/0013-pgroll-subset-vs-upstream.md)); the admission
+webhooks need cert-manager or your own serving certificate; the container
+image is published from tagged releases only, so build it yourself until the
+first release is cut.
 
-## HexxLock Cloud (commercial)
+More documentation is in [docs/](docs/): [runbook](docs/runbook.md),
+[migration authoring](docs/migration-authoring.md),
+[hardening](docs/operator-hardening.md), [ADRs](docs/adrs/README.md).
 
-The OSS operator is fully featured for self-hosted use. HexxLock offers a
-managed cloud product on top:
+## License
 
-- **Pro Seats** — SaaS dashboard, SSO, audit retention, AI plan explanation
-- **Pipelines** — hosted CI runners for plan + lint + dry-run
-- **Monitoring** — hosted drift detection + SLO dashboards + alerting
-- **Enterprise** — dedicated support, SLA, air-gapped installer
+- Operator, controllers and engine: AGPL-3.0-or-later ([LICENSE](LICENSE)).
+- CRD Go types in `api/`: Apache-2.0 ([api/LICENSE](api/LICENSE)), so clients
+  and providers can import them without taking on the AGPL. Files under
+  `api/` carry `Apache-2.0` SPDX identifiers.
 
-Cloud and OSS are interoperable. Migrating between them is a CRD export.
+See [NOTICE](NOTICE) for third-party software.
 
-## Audit pipeline (T2 #25)
+## Security
 
-Keystone implements a dual-write audit pipeline to meet the 7-year WORM
-retention mandate while
-simultaneously offloading audit storage pressure from etcd
-(internal engineering notes).
-
-### Architecture
-
-```
-audit.Logger.Append()
-  │
-  ├── [always] Create AuditEntry CR (etcd)   ← authoritative, chain-hashed
-  │
-  └── [best-effort] Exporter.Export()
-        │
-        ├── NATSExporter → NATS JetStream stream KEYSTONE_AUDIT
-        │     subject: audit.keystone.<verb>
-        │     Nats-Msg-Id: spec.SelfHash  (JetStream dedupe key)
-        │
-        └── StdoutJSONExporter → Loki / Alloy / Promtail (C1)
-
-Phase 3 audit-archiver (separate service):
-  KEYSTONE_AUDIT JetStream stream → pull consumer → MinIO WORM bucket
-  (object-lock retention 7 years, per security-stack tier-1 decision)
-```
-
-The CR is authoritative. A dropped JetStream publish is best-effort and
-recoverable via the backfill tool. Export errors are logged but never
-propagate back to the reconciler — a broken NATS broker does not affect
-operator availability.
-
-### Enabling NATS export
-
-Add to the operator deployment (or Argo helm-values block in
-`<gitops-repo>/keystone/manager-application.yaml`):
-
-```yaml
-controller:
-  extraEnv:
-    - name: AUDIT_NATS_URL
-      value: "nats://nats.messaging-system.svc.cluster.local:4222"
-    - name: AUDIT_NATS_SUBJECT_PREFIX
-      value: "audit.keystone"
-```
-
-The operator opts in by setting `AUDIT_NATS_URL`. When the variable is empty
-(the default) no NATS connection is attempted and behaviour is identical to
-before Phase 4.
-
-Flags also accepted:
-- `--audit-nats-url` (overrides `AUDIT_NATS_URL`)
-- `--audit-nats-subject-prefix` (default `audit.keystone`)
-- `--audit-nats-publish-timeout` (default `5s`)
-
-### Backfilling the existing 109k entries
-
-Use `keystone-backfill` to replay existing AuditEntry CRs into NATS
-JetStream. Idempotent — already-published entries are silently deduplicated
-by JetStream via the `Nats-Msg-Id` / `SelfHash` header.
-
-```sh
-# Dry-run: count entries without publishing
-keystoneadm backfill \
-  --kubeconfig ~/.kube/config \
-  --nats-url nats://nats.messaging-system.svc.cluster.local:4222 \
-  --dry-run
-
-# Full backfill
-keystoneadm backfill \
-  --kubeconfig ~/.kube/config \
-  --nats-url nats://nats.messaging-system.svc.cluster.local:4222
-
-# Resume from a checkpoint after interruption
-keystoneadm backfill \
-  --kubeconfig ~/.kube/config \
-  --nats-url nats://nats.messaging-system.svc.cluster.local:4222 \
-  --from-sequence 50000
-```
-
-Progress is logged every 1,000 entries. Re-running from the same
-`--from-sequence` is safe.
-
-### Phase 5a — WriteCR toggle (T2 #25)
-
-Phase 5a adds a `WriteCR bool` field to `audit.Logger` (default `true`) and
-a corresponding flag / env-var to the manager. It is the surgical toggle that
-lets the operator stop writing `AuditEntry` CRs to etcd once the Phase 4 NATS
-path has been proven live for 7 continuous days.
-
-#### Architectural note: chain-head relocation
-
-In Phase 4 (dual-write), the etcd `AuditLog.Status.LastEntryHash` is the
-authoritative chain-head pointer. In Phase 5a (`WriteCR=false`) that pointer
-moves to the Phase 3 archiver's `_chain/head.json` object in the MinIO WORM
-bucket. The archiver writes a new head pointer on every drained message.
-`Sequence` and `PrevHash` are therefore `0`/`""` in NATS-published specs when
-`WriteCR=false` — ordering is recovered by the archiver from the NATS
-JetStream delivery sequence, not from the spec fields.
-
-`SelfHash` (SHA-256 of the canonical spec) is always computed regardless of
-`WriteCR`, so the `Nats-Msg-Id` JetStream deduplication key remains stable and
-backfill replays are idempotent.
-
-#### Boot-time mode log
-
-At startup the manager emits exactly one of these structured log lines
-(field `msg`):
-
-| `AUDIT_WRITE_CR` | `AUDIT_NATS_URL` | Log message |
-|---|---|---|
-| `true` (default) | _(empty)_ | `audit: CR-only (legacy) — AuditEntry CRs written to etcd; no NATS exporter` |
-| `true` | set | `audit: dual-write (Phase 4) — CR authoritative + NATS shadow` |
-| `false` | set | `audit: NATS-only (Phase 5a) — chain-head in MinIO; etcd CR writes disabled` |
-| `false` | _(empty)_ | **fail-fast** — manager refuses to start (no durable audit sink) |
-
-#### Enabling Phase 5a
-
-Add to the operator deployment (or Argo helm-values block in
-`<gitops-repo>/keystone/manager-application.yaml`):
-
-```yaml
-controller:
-  extraEnv:
-    - name: AUDIT_WRITE_CR
-      value: "false"
-    - name: AUDIT_NATS_URL
-      value: "nats://nats.messaging-system.svc.cluster.local:4222"
-```
-
-Flags also accepted:
-- `--audit-write-cr=false` (overrides `AUDIT_WRITE_CR`)
-
-#### Phase 5a cutover sequence
-
-1. Confirm Phase 4 NATS dual-write has been running cleanly for **7 continuous
-   days** with zero publish errors in `keystone_audit_append_total{outcome="error"}`.
-2. Confirm the Phase 3 archiver has drained all entries into MinIO and
-   `_chain/head.json` is being updated on every message.
-3. Confirm MinIO object-lock / WORM retention policy is active on the bucket
-   (`s3api get-object-lock-configuration`).
-4. Set `AUDIT_WRITE_CR=false` alongside `AUDIT_NATS_URL` and roll the manager.
-   Verify the boot log shows `audit: NATS-only (Phase 5a)`.
-5. Monitor `keystone_audit_append_total{outcome="success_nocr"}` — this counter
-   rises when `WriteCR=false` and is zero in all other modes. Confirm it matches
-   the expected per-minute audit event rate.
-
-#### Phase 5b (future MR)
-
-Phase 5b removes the now-idle CR write code paths (AuditLog singleton,
-`maxEntrySequence` scan, AuditEntry CR create, AuditLog status patch) and
-retires the `AuditEntry` CRD after the `AuditEntryRetentionController` has
-drained the CR backlog. Do not merge Phase 5b until the retention drain is
-confirmed complete.
+Report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+Do not open a public issue for them.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). All commits must be signed off
-under the [Developer Certificate of Origin][dco].
-
-[dco]: https://developercertificate.org/
+See [CONTRIBUTING.md](CONTRIBUTING.md). Commits need a DCO sign-off
+(`git commit -s`). Be kind: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

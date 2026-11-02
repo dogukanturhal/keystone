@@ -38,7 +38,7 @@ func fixtureAuditEntry() *keystonev1alpha1.AuditEntry {
 				APIVersion: "keystone.hexxlock.io/v1alpha1",
 				Kind:       "MigrationBundle",
 				Namespace:  "keystone-system",
-				Name:       "example-service-public-desired-9d589396eb44",
+				Name:       "falcon-id-public-desired-9d589396eb44",
 			},
 			Before:   string(bigSnapshot),
 			After:    string(bigSnapshot),

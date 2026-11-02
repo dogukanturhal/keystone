@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -26,10 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	"github.com/dogukanturhal/keystone-sdk/go/analyze"
+	"github.com/dogukanturhal/keystone-sdk/go/migration"
 	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone/internal/approval"
-	"github.com/dogukanturhal/keystone-sdk/go/migration"
-	"github.com/dogukanturhal/keystone-sdk/go/analyze"
 	policycel "github.com/dogukanturhal/keystone/internal/policy/cel"
 )
 
@@ -115,6 +116,13 @@ func (v *MigrationBundleValidator) ValidateCreate(ctx context.Context, bundle *k
 // the validator can reject field mutations that would break the
 // bundle's immutability contract (same spec.version with different SQL).
 func (v *MigrationBundleValidator) ValidateUpdate(ctx context.Context, oldBundle, newBundle *keystonev1alpha1.MigrationBundle) (admission.Warnings, error) {
+	// Metadata/status-only updates must not revalidate external SQL. A
+	// changed ConfigMap may already have wedged the bundle, but finalizer
+	// cleanup, approval annotations and Argo dry-run diffs still need to
+	// work. Reconciliation remains responsible for external source drift.
+	if equality.Semantic.DeepEqual(oldBundle.Spec, newBundle.Spec) {
+		return nil, nil
+	}
 	return v.validate(ctx, newBundle, oldBundle)
 }
 
@@ -322,7 +330,7 @@ func (v *MigrationBundleValidator) validate(
 				return warnings, fmt.Errorf(
 					"admission refused: %d approval requirement(s) unmet — %s. "+
 						"Add `%s<policy-name>.<approver-id>=<group>` annotations; "+
-						"full schema in docs/adrs/0016.",
+						"full schema in docs/adrs/0016",
 					len(violations), strings.Join(msgs, "; "),
 					keystonev1alpha1.AnnotationApprovalPrefix)
 			}
@@ -332,7 +340,7 @@ func (v *MigrationBundleValidator) validate(
 					"admission refused: %d lint error(s) — %s. "+
 						"To admit a destructive bundle, attach a SchemaPolicy with an "+
 						"ApprovalPolicy whose AppliesWhen.MinLintSeverity ≤ `error` and "+
-						"satisfy it via `%s<policy>.<approver>=<group>` annotations.",
+						"satisfy it via `%s<policy>.<approver>=<group>` annotations",
 					len(errs), strings.Join(errs, "; "),
 					keystonev1alpha1.AnnotationApprovalPrefix)
 			}
@@ -353,6 +361,7 @@ func (v *MigrationBundleValidator) validate(
 			// race can sneak past.
 			if old != nil &&
 				old.Spec.Version == bundle.Spec.Version &&
+				(old.Status.ContentHashVersion == "" || old.Status.ContentHashVersion == bundle.Spec.Version) &&
 				old.Status.ContentHash != "" &&
 				src.ContentHash != old.Status.ContentHash {
 				return warnings, fmt.Errorf(
@@ -381,12 +390,12 @@ func (v *MigrationBundleValidator) validateIntegrity(
 	case migration.SumStatusMalformed:
 		return fmt.Errorf(
 			"admission refused: keystone.sum in bundle %q failed to parse: %v. "+
-				"Regenerate with `keystonectl sum <dir>` and commit the new file.",
+				"Regenerate with `keystonectl sum <dir>` and commit the new file",
 			bundle.Name, src.IntegrityError)
 	case migration.SumStatusMismatch:
 		return fmt.Errorf(
 			"admission refused: bundle %q diverges from its keystone.sum: %v. "+
-				"Either revert the SQL change or regenerate keystone.sum to accept it.",
+				"Either revert the SQL change or regenerate keystone.sum to accept it",
 			bundle.Name, src.IntegrityError)
 	case migration.SumStatusMissing:
 		required, policyName, err := v.sumRequiredForBundle(ctx, bundle)
@@ -399,7 +408,7 @@ func (v *MigrationBundleValidator) validateIntegrity(
 		if required {
 			return fmt.Errorf(
 				"admission refused: SchemaPolicy %q requires keystone.sum but bundle %q "+
-					"does not contain one. Run `keystonectl sum <dir>` and commit the file.",
+					"does not contain one. Run `keystonectl sum <dir>` and commit the file",
 				policyName, bundle.Name)
 		}
 	}
@@ -489,46 +498,6 @@ func (v *MigrationBundleValidator) matchedPolicies(
 		}
 	}
 	return matched, nil
-}
-
-// validateApprovals enforces the N-of-M approval gate at admission.
-// Runs approval.Evaluate against every matched SchemaPolicy and
-// rejects the bundle when any applicable ApprovalPolicy is
-// under-quorum. Lint findings are passed so ApprovalCondition.
-// MinLintSeverity can fire.
-//
-// Returns nil when the bundle is approved (or no policy applies).
-func (v *MigrationBundleValidator) validateApprovals(
-	ctx context.Context,
-	bundle *keystonev1alpha1.MigrationBundle,
-	findings []keystonev1alpha1.LintFinding,
-) error {
-	matched, err := v.matchedPolicies(ctx, bundle)
-	if err != nil {
-		// Soft-fail: a broken SchemaPolicy listing path should not
-		// brick admission of every bundle cluster-wide. The reconciler
-		// re-runs the check every loop; drift surfaces in the
-		// condition there.
-		return nil
-	}
-	res := approval.Evaluate(bundle, matched, findings)
-	if res.Satisfied {
-		return nil
-	}
-	violations := res.Unsatisfied()
-	if len(violations) == 0 {
-		return nil
-	}
-	msgs := make([]string, 0, len(violations))
-	for _, pr := range violations {
-		msgs = append(msgs, pr.Violation)
-	}
-	return fmt.Errorf(
-		"admission refused: %d approval requirement(s) unmet — %s. "+
-			"Add `%s<policy-name>.<approver-id>=<group>` annotations; "+
-			"full schema in docs/adrs/0016.",
-		len(violations), strings.Join(msgs, "; "),
-		keystonev1alpha1.AnnotationApprovalPrefix)
 }
 
 // validateCELExpressions evaluates every CELRule from matched

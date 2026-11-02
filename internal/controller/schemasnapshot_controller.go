@@ -15,17 +15,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/dogukanturhal/keystone-sdk/go/drift"
+	"github.com/dogukanturhal/keystone-sdk/go/migration"
 	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone/internal/audit"
 	"github.com/dogukanturhal/keystone/internal/conditions"
-	"github.com/dogukanturhal/keystone-sdk/go/drift"
-	"github.com/dogukanturhal/keystone-sdk/go/migration"
 	pg "github.com/dogukanturhal/keystone/internal/postgres"
 	"github.com/dogukanturhal/keystone/internal/viz"
 )
@@ -43,7 +42,7 @@ import (
 type SchemaSnapshotReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Pools    *pg.PoolCache
 
 	SystemNamespace string
@@ -280,11 +279,11 @@ func (r *SchemaSnapshotReconciler) resolveCredentials(
 	}
 	u, ok := sec.Data[userKey]
 	if !ok || len(u) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret missing key %q", userKey)
+		return resolvedCreds{}, fmt.Errorf("secret missing key %q", userKey)
 	}
 	pw, ok := sec.Data[passKey]
 	if !ok || len(pw) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret missing key %q", passKey)
+		return resolvedCreds{}, fmt.Errorf("secret missing key %q", passKey)
 	}
 	return resolvedCreds{Username: string(u), Password: string(pw)}, nil
 }
@@ -295,7 +294,7 @@ func (r *SchemaSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.SystemNamespace = "keystone-system"
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-schemasnapshot")
+		r.Recorder = eventRecorderFor(mgr, "keystone-schemasnapshot")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&keystonev1alpha1.SchemaSnapshot{},

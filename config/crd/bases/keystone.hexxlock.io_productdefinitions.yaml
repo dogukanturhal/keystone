@@ -103,8 +103,8 @@ spec:
                 items:
                   description: |-
                     ProductDatabase describes one logical database the product needs.
-                    A product may declare multiple databases (e.g. a core database
-                    plus a separate financials database).
+                    A product may declare multiple databases (e.g. example_suite +
+                    hexxlock_financials for ExampleSuite).
                   properties:
                     extensions:
                       description: |-
@@ -136,7 +136,7 @@ spec:
                       description: |-
                         Name is the actual PostgreSQL database name template. Tokens
                         {{tenantID}} and {{productSlug}} are substituted by the
-                        TenancyController at instantiation. Example: "example_suite_{{tenantID}}".
+                        TenancyController at instantiation. Example: "example_{{tenantID}}".
                       maxLength: 63
                       type: string
                     providerRef:

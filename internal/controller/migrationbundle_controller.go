@@ -17,20 +17,19 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/dogukanturhal/keystone-sdk/go/analyze"
+	"github.com/dogukanturhal/keystone-sdk/go/migration"
 	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone/internal/approval"
 	"github.com/dogukanturhal/keystone/internal/audit"
 	"github.com/dogukanturhal/keystone/internal/conditions"
 	"github.com/dogukanturhal/keystone/internal/devdb"
-	"github.com/dogukanturhal/keystone-sdk/go/migration"
-	"github.com/dogukanturhal/keystone-sdk/go/analyze"
 )
 
 // integrityMessageMaxLen matches MigrationBundle.status.integrity.message
@@ -88,7 +87,7 @@ func requeueWithJitter(d time.Duration) time.Duration {
 type MigrationBundleReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Resolver migration.SourceResolver
 
 	// AuditLogger appends tamper-evident entries to the audit chain on
@@ -140,7 +139,7 @@ func (r *MigrationBundleReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.Update(ctx, &bundle); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	// Resolve source.
@@ -153,10 +152,14 @@ func (r *MigrationBundleReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			fmt.Errorf("source resolved to zero files; check filePattern"))
 	}
 
-	// Anti-tamper check: if status.contentHash is set and differs from
-	// the freshly-resolved hash, an operator changed the SQL in place
-	// at the same Version. Refuse.
-	if bundle.Status.ContentHash != "" && bundle.Status.ContentHash != src.ContentHash {
+	// Hashes are immutable per version, not per resource name. Recover
+	// legacy pins before comparing; fail() advances ObservedGeneration,
+	// so generation alone cannot distinguish a wedged version bump.
+	hashVersion, err := r.contentHashVersion(ctx, &bundle)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if bundle.Status.ContentHash != "" && hashVersion == bundle.Spec.Version && bundle.Status.ContentHash != src.ContentHash {
 		return r.fail(ctx, &bundle, "ContentHashChanged",
 			fmt.Errorf(
 				"version %q has prior contentHash %q but source now hashes to %q; "+
@@ -245,6 +248,24 @@ func (r *MigrationBundleReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, fmt.Errorf("list schemas: %w", err)
 	}
 
+	// Persist the pair before any fanout, including staged rollouts and
+	// partial failures. Mutating only the in-memory bundle would be lost
+	// by later merge patches whose baseline already includes the hash.
+	if bundle.Status.ContentHash != src.ContentHash || bundle.Status.ContentHashVersion != bundle.Spec.Version {
+		original := bundle.DeepCopy()
+		if hashVersion != bundle.Spec.Version {
+			bundle.Status.CurrentStage = ""
+			bundle.Status.StageHistory = nil
+			bundle.Status.SchemaProgress = nil
+			bundle.Status.AppliedSchemas = 0
+		}
+		bundle.Status.ContentHash = src.ContentHash
+		bundle.Status.ContentHashVersion = bundle.Spec.Version
+		if err := r.Status().Patch(ctx, &bundle, client.MergeFrom(original)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("pin content hash: %w", err)
+		}
+	}
+
 	// Staged rollout path: when spec.rolloutPolicyRef is set, hand off
 	// to reconcileStaged. Bundles without a policy keep the original
 	// all-at-once fanout (Phase 3 behaviour).
@@ -263,6 +284,7 @@ func (r *MigrationBundleReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		matched  int32
 		applied  int32
 		inFlight int32
+		out      executionOutcome
 	)
 	cap := bundle.Spec.MaxConcurrentExecutions
 	progress := make([]keystonev1alpha1.SchemaProgress, 0, len(schemas.Items))
@@ -299,6 +321,12 @@ func (r *MigrationBundleReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			}
 			if isExecutionActive(existing.Status.Phase) {
 				inFlight++
+			}
+			if isExecutionFailedTerminal(existing.Status.Phase) {
+				out.failed++
+				if existing.Status.Phase == keystonev1alpha1.ExecutionPhaseAborted && isStaleAbort(&existing) {
+					out.stale++
+				}
 			}
 			progress = append(progress, schemaProgressFromExecution(s, &existing))
 			continue
@@ -386,7 +414,45 @@ func (r *MigrationBundleReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, fmt.Errorf("patch schemaProgress: %w", err)
 	}
 
-	return r.success(ctx, &bundle, src.ContentHash, matched, applied, logger)
+	out.inFlight = inFlight
+	return r.successWithOutcome(ctx, &bundle, src.ContentHash, matched, applied, out, logger)
+}
+
+// executionOutcome summarises executions that settled without applying, so
+// the bundle can report a terminal verdict instead of sitting Progressing
+// forever (which kept it alive for the CR-TTL sweep).
+type executionOutcome struct {
+	inFlight int32
+	failed   int32 // Failed + Aborted + RollbackFailed
+	stale    int32 // subset of failed: Aborted with reason StaleDeclarativePlan
+}
+
+const (
+	reasonExecutionsFailed = "ExecutionsFailed"
+	reasonSuperseded       = "Superseded"
+	// reasonStaleDeclarativePlan is the Ready reason a MigrationExecution
+	// carries when its declarative plan no longer matches the SchemaDefinition
+	// or live schema and was aborted before executing any SQL.
+	reasonStaleDeclarativePlan = "StaleDeclarativePlan"
+)
+
+func isSettledFailure(out executionOutcome, matched, applied int32) bool {
+	return out.inFlight == 0 && out.failed > 0 && matched > 0 && applied+out.failed == matched
+}
+
+func isExecutionFailedTerminal(phase keystonev1alpha1.ExecutionPhase) bool {
+	switch phase {
+	case keystonev1alpha1.ExecutionPhaseFailed,
+		keystonev1alpha1.ExecutionPhaseAborted,
+		keystonev1alpha1.ExecutionPhaseRollbackFailed:
+		return true
+	}
+	return false
+}
+
+func isStaleAbort(exec *keystonev1alpha1.MigrationExecution) bool {
+	c := conditions.Get(exec.Status.Conditions, keystonev1alpha1.ConditionTypeReady)
+	return c != nil && c.Reason == reasonStaleDeclarativePlan
 }
 
 // isExecutionActive reports whether an execution is in a phase that
@@ -397,7 +463,8 @@ func isExecutionActive(phase keystonev1alpha1.ExecutionPhase) bool {
 	switch phase {
 	case keystonev1alpha1.ExecutionPhaseSucceeded,
 		keystonev1alpha1.ExecutionPhaseFailed,
-		keystonev1alpha1.ExecutionPhaseAborted:
+		keystonev1alpha1.ExecutionPhaseAborted,
+		keystonev1alpha1.ExecutionPhaseRollbackFailed:
 		return false
 	}
 	return true
@@ -464,6 +531,17 @@ func (r *MigrationBundleReconciler) success(
 	matched, applied int32,
 	logger logr.Logger,
 ) (ctrl.Result, error) {
+	return r.successWithOutcome(ctx, bundle, contentHash, matched, applied, executionOutcome{}, logger)
+}
+
+func (r *MigrationBundleReconciler) successWithOutcome(
+	ctx context.Context,
+	bundle *keystonev1alpha1.MigrationBundle,
+	contentHash string,
+	matched, applied int32,
+	out executionOutcome,
+	logger logr.Logger,
+) (ctrl.Result, error) {
 	// Change-only gate (KS#5 follow-up).
 	//
 	// Snapshot the persisted status BEFORE any mutation so we can
@@ -495,6 +573,7 @@ func (r *MigrationBundleReconciler) success(
 
 	bundle.Status.ObservedGeneration = bundle.Generation
 	bundle.Status.ContentHash = contentHash
+	bundle.Status.ContentHashVersion = bundle.Spec.Version
 	bundle.Status.MatchedSchemas = matched
 	bundle.Status.AppliedSchemas = applied
 
@@ -512,6 +591,20 @@ func (r *MigrationBundleReconciler) success(
 			fmt.Sprintf("version %s applied to %d schema(s)", bundle.Spec.Version, matched),
 			bundle.Generation)
 		bundle.Status.Conditions = conditions.ClearProgressing(bundle.Status.Conditions, bundle.Generation)
+	} else if isSettledFailure(out, matched, applied) {
+		// Every matched schema either applied or ended terminally without
+		// applying. Say so: leaving the bundle Progressing with no Ready
+		// verdict made it look in-flight forever.
+		reason := reasonExecutionsFailed
+		if out.stale == out.failed {
+			reason = reasonSuperseded
+		}
+		bundle.Status.Conditions = conditions.Set(bundle.Status.Conditions,
+			keystonev1alpha1.ConditionTypeReady, metav1.ConditionFalse, reason,
+			fmt.Sprintf("version %s: %d/%d schema(s) applied, %d execution(s) ended Failed/Aborted",
+				bundle.Spec.Version, applied, matched, out.failed),
+			bundle.Generation)
+		bundle.Status.Conditions = conditions.ClearProgressing(bundle.Status.Conditions, bundle.Generation)
 	} else {
 		bundle.Status.Conditions = conditions.MarkProgressing(bundle.Status.Conditions,
 			"ApplyingToSchemas",
@@ -522,7 +615,7 @@ func (r *MigrationBundleReconciler) success(
 	// Long requeue when Ready=True (drift backstop only); tighter when
 	// applying so per-execution progress surfaces fast.
 	requeue := readyRequeue
-	if !ready {
+	if !ready && !isSettledFailure(out, matched, applied) {
 		requeue = applyingRequeue
 	}
 	requeue = requeueWithJitter(requeue)
@@ -557,6 +650,46 @@ func (r *MigrationBundleReconciler) success(
 		"success")
 
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// contentHashVersion upgrades legacy status without trusting the most
+// recently attempted generation. Executions retain the structured version
+// and hash even after ContentHashChanged overwrote Ready/ObservedGeneration.
+// Planned is a fallback for old bundles with zero matched schemas (no ME).
+func (r *MigrationBundleReconciler) contentHashVersion(ctx context.Context, bundle *keystonev1alpha1.MigrationBundle) (string, error) {
+	if bundle.Status.ContentHashVersion != "" {
+		return bundle.Status.ContentHashVersion, nil
+	}
+	if bundle.Status.ContentHash != "" {
+		var executions keystonev1alpha1.MigrationExecutionList
+		if err := r.List(ctx, &executions); err != nil {
+			return "", fmt.Errorf("recover legacy content hash version: %w", err)
+		}
+		var latest *keystonev1alpha1.MigrationExecution
+		for i := range executions.Items {
+			exec := &executions.Items[i]
+			if !metav1.IsControlledBy(exec, bundle) || exec.Spec.BundleRef != bundle.Name ||
+				exec.Spec.ContentHash != bundle.Status.ContentHash || exec.Spec.BundleVersion == "" {
+				continue
+			}
+			if latest == nil || latest.CreationTimestamp.Before(&exec.CreationTimestamp) {
+				latest = exec
+			}
+		}
+		if latest != nil {
+			return latest.Spec.BundleVersion, nil
+		}
+		for _, c := range bundle.Status.Conditions {
+			if c.Type == keystonev1alpha1.ConditionTypePlanned && c.Reason == "Reconciled" && c.Status == metav1.ConditionTrue &&
+				strings.HasPrefix(c.Message, "dispatched to ") {
+				if _, version, ok := strings.Cut(c.Message, " already at version "); ok && version != "" {
+					return version, nil
+				}
+			}
+		}
+	}
+	// No evidence of a previous version: keep same-version protection.
+	return bundle.Spec.Version, nil
 }
 
 func (r *MigrationBundleReconciler) fail(
@@ -952,7 +1085,7 @@ func (r *MigrationBundleReconciler) runAnalyzers(
 // for the periodic requeue.
 func (r *MigrationBundleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-migrationbundle")
+		r.Recorder = eventRecorderFor(mgr, "keystone-migrationbundle")
 	}
 	if r.Resolver == nil {
 		// APIReader (uncached) — the operator's ConfigMap cache is

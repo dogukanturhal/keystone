@@ -12,8 +12,8 @@
 // missed entries after a NATS outage.
 //
 // Architecture refs:
-//   - a 7-year WORM retention mandate
-//   - internal engineering notes on high-cardinality CRD list OOMs — root
+//   - internal engineering notes — 7-year WORM mandate
+//   - internal engineering notes — root
 //     cause motivating the etcd → NATS → MinIO offload
 
 package audit

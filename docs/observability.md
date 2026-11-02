@@ -27,6 +27,11 @@ Operator scrape config goes via a `ServiceMonitor` (Phase 8 manifests in
 | `keystone_drift_checks_total`                | counter   | namespace, logical_database, schema, outcome (`clean`\|`drift`\|`error`) | Coverage + error-rate signal. |
 | `keystone_drift_check_duration_seconds`      | histogram | namespace, logical_database, schema | Tune `--drift-check-interval` if p99 approaches it. |
 | `keystone_drift_staleness_seconds`           | gauge     | namespace, logical_database, schema | 0 after a successful inspection; alerts at `> 2× interval`. |
+| `keystone_ownership_drift_objects`           | gauge     | namespace, logical_database, database, kind, owner, remediable | Objects in managed schemas not owned by `spec.ownerRole`; only non-zero groups. See [ownership-drift runbook](runbooks/ownership-drift.md). |
+| `keystone_ownership_drift_last_check_timestamp_seconds` | gauge | namespace, logical_database | Last successful ownership check. |
+| `keystone_ownership_drift_checks_total`      | counter   | namespace, logical_database, outcome (`clean`\|`drift`\|`error`) | Ownership check coverage + error rate. |
+| `keystone_ownership_drift_check_duration_seconds` | histogram | — | Catalog query latency (no per-database labels). |
+| `keystone_ownership_remediations_total`      | counter   | namespace, logical_database, kind, outcome | Remediation results (`reassigned`\|`failed`\|`skipped_*`). |
 
 ### Controller-runtime defaults (per Reconciler)
 
@@ -182,5 +187,5 @@ provisions the canonical dashboard via Grafana Operator. Panels:
 - Pool size + active connections per provider
 
 Dashboard JSON ships with the keystone repo at
-`hack/grafana-dashboard-keystone-overview.json`. A ConfigMap in the GitOps
-repository wraps it for Grafana Operator to pick up.
+`hack/grafana-dashboard-keystone-overview.json`. The
+the GitOps repository ConfigMap wraps it for Grafana Operator to pick up.

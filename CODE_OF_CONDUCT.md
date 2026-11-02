@@ -69,7 +69,7 @@ officially representing the community in public spaces.
 Instances of abusive, harassing, or otherwise unacceptable behaviour
 may be reported to the project maintainers at:
 
-> **`conduct@hexxlock.com`**
+> **`dogukanturhal@hexxlock.com`**
 
 All complaints will be reviewed and investigated promptly and fairly.
 All maintainers are obligated to respect the privacy and security of

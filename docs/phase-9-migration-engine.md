@@ -140,7 +140,7 @@ spec:
   source:
     type: OCIArtifact
     ociArtifactRef:
-      repository: ghcr.io/dogukanturhal/migrations/billing
+      repository: registry.example.com/migrations/billing
       digest: sha256:abc123...  # immutable reference
       pullSecretRef: harbor-robot-creds
 ```

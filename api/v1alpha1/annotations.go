@@ -101,7 +101,7 @@ const (
 	// SD to every emitted MigrationBundle so policy-matching works
 	// for both authoring paths uniformly.
 	//
-	// Convention values: `example-service`, `example-suite`, `talon`, etc.
+	// Convention values: `falcon-id`, `examplesuite`, `talon`, etc.
 	LabelScope = "keystone.hexxlock.io/scope"
 
 	// AnnotationSDFingerprint identifies the SchemaDefinition's
@@ -110,7 +110,7 @@ const (
 	// the MigrationExecution reconciler reads it on Phase=Succeeded to
 	// stamp DatabaseSchema.Status.LastAppliedFingerprint = annotation
 	// value, enabling identity-based per-schema convergence checks
-	// (keystone-sdk/go/keystone.WaitSchemaFingerprint).
+	// (pkg/sdk/keystone.WaitSchemaFingerprint).
 	//
 	// Hand-authored MigrationBundles don't carry this annotation;
 	// MigrationExecution reconciler skips the stamp in that case.

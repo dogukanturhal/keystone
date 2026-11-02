@@ -19,17 +19,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/dogukanturhal/keystone-sdk/go/declarative"
+	"github.com/dogukanturhal/keystone-sdk/go/drift"
 	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone/internal/conditions"
-	"github.com/dogukanturhal/keystone-sdk/go/drift"
-	"github.com/dogukanturhal/keystone-sdk/go/declarative"
+	"github.com/dogukanturhal/keystone/internal/audit"
 	pg "github.com/dogukanturhal/keystone/internal/postgres"
 )
 
@@ -45,10 +45,17 @@ import (
 type SchemaDefinitionReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Pools    *pg.PoolCache
 
 	SystemNamespace string
+
+	// AuditLogger records pruned bundles on the audit chain. Optional;
+	// nil is a no-op.
+	AuditLogger *audit.Logger
+
+	// ManagerIdentity is the Actor stamped on reconciler-sourced entries.
+	ManagerIdentity keystonev1alpha1.AuditActor
 }
 
 // +kubebuilder:rbac:groups=keystone.hexxlock.io,resources=schemadefinitions,verbs=get;list;watch;create;update;patch;delete
@@ -139,6 +146,9 @@ func (r *SchemaDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err != nil {
 		return r.fail(ctx, &sd, "BundleEmissionFailed", err)
 	}
+	r.retryStaleExecutions(ctx, &sd, bundleName, logger)
+	r.pruneSupersededBundles(ctx, &sd, bundleName, logger)
+
 	plan := canonicalPlan
 
 	// Status update: report pending ops + current bundle ref.
@@ -179,7 +189,7 @@ func (r *SchemaDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// from before the spec was fixed. Operators reading the SD via
 	// `kubectl describe` see contradictory state and assume the gate
 	// is still blocking apply (observed 2026-05-04 against
-	// example-service-control-public-desired after the realms.id /
+	// falcon-id-control-public-desired after the realms.id /
 	// realm_tenants.* nullability fix).
 	sd.Status.Conditions = conditions.Set(sd.Status.Conditions,
 		keystonev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "BundleEmitted",
@@ -215,6 +225,8 @@ func (r *SchemaDefinitionReconciler) markReady(
 	// mutation and gating the patch on semantic-equality keeps drift
 	// detection (still hourly via RequeueAfter) without persisting a
 	// no-op write.
+	r.pruneSupersededBundles(ctx, sd, "", logger)
+
 	originalStatus := sd.Status.DeepCopy()
 	patch := client.MergeFrom(sd.DeepCopy())
 
@@ -238,7 +250,7 @@ func (r *SchemaDefinitionReconciler) markReady(
 	// converged or is 174 ops behind — and the timestamps do not
 	// disambiguate, because LastTransitionTime only moves on a status
 	// flip, so all four look equally current. Observed 2026-08-06 on
-	// downstream-service-public-desired, where the three lane conditions were
+	// downstream-public-desired, where the three lane conditions were
 	// still pinned to a 21:11:30 diff hours after it applied.
 	//
 	// This is the mirror of the bundle lane's stale-Ready clear: the
@@ -288,9 +300,11 @@ func (r *SchemaDefinitionReconciler) markReady(
 }
 
 // markNoMatches handles SchemaSelector matching zero DatabaseSchemas.
-// Not a hard failure: an operator pre-creating a tenant-template SD
-// before the first tenant DB exists is a legitimate use case. We
-// surface it on status and re-queue.
+// Not a failure: an operator pre-creating a tenant-template SD before
+// the first tenant DB exists is a legitimate use case, so Ready is True
+// (nothing is out of the desired state) with reason NoMatchingSchemas.
+// The three stage conditions stay False with the same reason, so a
+// selector that matches nothing by mistake is still visible on status.
 func (r *SchemaDefinitionReconciler) markNoMatches(
 	ctx context.Context,
 	sd *keystonev1alpha1.SchemaDefinition,
@@ -317,9 +331,9 @@ func (r *SchemaDefinitionReconciler) markNoMatches(
 	sd.Status.Conditions = conditions.Set(sd.Status.Conditions,
 		keystonev1alpha1.ConditionTypeBundleGenerated, metav1.ConditionFalse, "NoMatchingSchemas",
 		"no schemas matched; no MigrationBundle emitted", sd.Generation)
-	sd.Status.Conditions = conditions.MarkNotReady(sd.Status.Conditions,
+	sd.Status.Conditions = conditions.MarkReady(sd.Status.Conditions,
 		"NoMatchingSchemas",
-		fmt.Errorf("schemaSelector matched 0 DatabaseSchemas in namespace %s; create at least one matching schema",
+		fmt.Sprintf("schemaSelector matched 0 DatabaseSchemas in namespace %s; nothing to reconcile until a matching schema exists",
 			sd.Namespace),
 		sd.Generation)
 	sd.Status.Conditions = conditions.ClearProgressing(sd.Status.Conditions, sd.Generation)
@@ -657,7 +671,7 @@ func (r *SchemaDefinitionReconciler) markDestructiveBlocked(
 // MigrationExecution reconciler reads the annotation on Phase=Succeeded
 // and stamps DatabaseSchema.Status.LastAppliedFingerprint = annotation
 // value, enabling identity-based per-schema convergence checks
-// (keystone-sdk/go/keystone.WaitSchemaFingerprint).
+// (pkg/sdk/keystone.WaitSchemaFingerprint).
 //
 // Marshaling via encoding/json with sorted map keys (Go's default for
 // struct fields is declaration order; for any map[string]X fields
@@ -674,6 +688,147 @@ func specFingerprint(spec *keystonev1alpha1.SchemaDefinitionSpec) string {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// retryStaleExecutions un-sticks a declarative bundle whose name matches the
+// plan the SD just computed but whose executions were aborted as stale
+// (reason StaleDeclarativePlan, no SQL ran). Bundle names are content
+// addresses and an execution name is fixed per (bundle, version, schema), so
+// the bundle controller never recreates an Aborted execution on its own. The
+// SD has just re-diffed the live schema and refreshed the bundle's
+// fingerprint annotation, so the plan validates now; deleting only the
+// stale-aborted executions lets the bundle controller recreate them, and the
+// precheck re-validates under the schema lock. Executions that Failed on a
+// real SQL error are left alone (no retry loop), as are Argo-tracked and
+// non-declarative bundles. Idempotent: once deleted there is nothing to do.
+func (r *SchemaDefinitionReconciler) retryStaleExecutions(
+	ctx context.Context,
+	sd *keystonev1alpha1.SchemaDefinition,
+	bundleName string,
+	logger logr.Logger,
+) {
+	var b keystonev1alpha1.MigrationBundle
+	if err := r.Get(ctx, types.NamespacedName{Namespace: sd.Namespace, Name: bundleName}, &b); err != nil {
+		return
+	}
+	if b.Labels[keystonev1alpha1.LabelSource] != "declarative-diff" ||
+		b.Labels[keystonev1alpha1.LabelSchemaDefinition] != sd.Name ||
+		!metav1.IsControlledBy(&b, sd) || isArgoTracked(&b) ||
+		b.Annotations[keystonev1alpha1.AnnotationSDFingerprint] != specFingerprint(&sd.Spec) {
+		return
+	}
+	var execs keystonev1alpha1.MigrationExecutionList
+	if err := r.List(ctx, &execs, client.InNamespace(sd.Namespace)); err != nil {
+		logger.Error(err, "list executions for stale retry")
+		return
+	}
+	for i := range execs.Items {
+		e := &execs.Items[i]
+		if e.Spec.BundleRef != b.Name || e.Status.Phase != keystonev1alpha1.ExecutionPhaseAborted ||
+			!e.DeletionTimestamp.IsZero() || !isStaleAbort(e) {
+			continue
+		}
+		if err := r.Delete(ctx, e); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "delete stale-aborted execution", "execution", e.Name)
+			continue
+		}
+		msg := fmt.Sprintf("retrying bundle %s: deleted stale-aborted execution %s; plan re-validated", b.Name, e.Name)
+		logger.Info(msg)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(sd, corev1.EventTypeNormal, "StaleExecutionRetried", "%s", msg)
+		}
+	}
+}
+
+// pruneSupersededBundles deletes this SD's declarative bundles (and their SQL
+// ConfigMaps) that can never be useful again: not Ready=True, not `keep`, no
+// execution in flight and none that applied. Without it a bundle whose plan
+// went stale (a failed or aborted attempt) lingers, and anything that
+// recreates its executions replays out-of-date SQL. Best-effort; errors are
+// logged and retried on the next reconcile.
+func (r *SchemaDefinitionReconciler) pruneSupersededBundles(
+	ctx context.Context,
+	sd *keystonev1alpha1.SchemaDefinition,
+	keep string,
+	logger logr.Logger,
+) {
+	var bundles keystonev1alpha1.MigrationBundleList
+	if err := r.List(ctx, &bundles, client.InNamespace(sd.Namespace), client.MatchingLabels{
+		keystonev1alpha1.LabelSchemaDefinition: sd.Name,
+		keystonev1alpha1.LabelSource:           "declarative-diff",
+	}); err != nil {
+		logger.Error(err, "list bundles for prune")
+		return
+	}
+	var execs *keystonev1alpha1.MigrationExecutionList // listed lazily
+	for i := range bundles.Items {
+		b := &bundles.Items[i]
+		if b.Name == keep || !metav1.IsControlledBy(b, sd) || !b.DeletionTimestamp.IsZero() ||
+			isArgoTracked(b) || conditions.IsTrue(b.Status.Conditions, keystonev1alpha1.ConditionTypeReady) {
+			continue
+		}
+		if execs == nil {
+			execs = &keystonev1alpha1.MigrationExecutionList{}
+			if err := r.List(ctx, execs, client.InNamespace(sd.Namespace)); err != nil {
+				logger.Error(err, "list executions for prune")
+				return
+			}
+		}
+		busy := false
+		for j := range execs.Items {
+			e := &execs.Items[j]
+			if e.Spec.BundleRef != b.Name {
+				continue
+			}
+			if isExecutionActive(e.Status.Phase) || e.Status.Phase == keystonev1alpha1.ExecutionPhaseSucceeded {
+				busy = true
+				break
+			}
+		}
+		if busy {
+			continue
+		}
+		if err := r.Delete(ctx, b); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "prune superseded bundle", "bundle", b.Name)
+			continue
+		}
+		if ref := b.Spec.Source.ConfigMapRef; b.Spec.Source.Type == keystonev1alpha1.SourceConfigMap &&
+			ref != nil && strings.HasPrefix(ref.Name, sd.Name+"-sql-") {
+			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: b.Namespace, Name: ref.Name}}
+			if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "prune superseded bundle ConfigMap", "configmap", ref.Name)
+			}
+		}
+		msg := fmt.Sprintf("pruned superseded MigrationBundle %s", b.Name)
+		logger.Info(msg, "keep", keep)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(sd, corev1.EventTypeNormal, "SupersededBundlePruned", "%s", msg)
+		}
+		if r.AuditLogger != nil {
+			if _, _, err := r.AuditLogger.Append(ctx, audit.Event{
+				Verb:        "delete",
+				Actor:       r.ManagerIdentity,
+				ResourceRef: audit.ResourceRefFromObject(b),
+				Reason:      msg,
+				Outcome:     "success",
+			}); err != nil {
+				logger.Error(err, "audit append failed", "bundle", b.Name)
+			}
+		}
+	}
+}
+
+// planContentHash is the full SHA-256 hex identity of a plan's statements
+// (NUL-separated). It names the emitted bundle and ConfigMap, and the
+// execution-time staleness precheck recomputes it to detect a plan that no
+// longer matches the live schema. Changing it renames every bundle.
+func planContentHash(plan *declarative.Plan) string {
+	h := sha256.New()
+	for _, s := range plan.Statements {
+		h.Write([]byte(s))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // emitBundle creates (or updates) the ConfigMap holding the SQL
@@ -720,12 +875,7 @@ func (r *SchemaDefinitionReconciler) emitBundle(
 	// architectural fix is to make bundleName content-addressed at the
 	// full hash; bundleVersion can remain short because it's never the
 	// PRIMARY content-address — that role belongs to bundleName.
-	h := sha256.New()
-	for _, s := range plan.Statements {
-		h.Write([]byte(s))
-		h.Write([]byte{0})
-	}
-	contentHash := hex.EncodeToString(h.Sum(nil))
+	contentHash := planContentHash(plan)
 	shortHash := contentHash[:16]
 
 	cmName := fmt.Sprintf("%s-sql-%s", sd.Name, contentHash)
@@ -762,7 +912,7 @@ func (r *SchemaDefinitionReconciler) emitBundle(
 	// (deterministic identity), so the no-op skip is safe. Updating
 	// in place is forbidden — it would re-introduce the silent-mutate
 	// bug that motivated content-addressed naming.
-	if err := r.Client.Create(ctx, cm); err != nil && !apierrors.IsAlreadyExists(err) {
+	if err := r.Create(ctx, cm); err != nil && !apierrors.IsAlreadyExists(err) {
 		return "", fmt.Errorf("create ConfigMap: %w", err)
 	}
 
@@ -770,7 +920,7 @@ func (r *SchemaDefinitionReconciler) emitBundle(
 	// to the emitted MigrationBundle. Two purposes:
 	//
 	//   1. SchemaPolicy.TargetSelector picks bundles by label. The
-	//      SD's labels (e.g., `keystone.hexxlock.io/scope: example-service`)
+	//      SD's labels (e.g., `keystone.hexxlock.io/scope: falcon-id`)
 	//      decide which approval / lint policies apply. Without
 	//      propagating these, the auto-emitted bundle escapes every
 	//      policy that an operator wrote against the SD's scope —
@@ -995,12 +1145,12 @@ func (r *SchemaDefinitionReconciler) resolveCredentials(ctx context.Context, p *
 	}
 	u, ok := sec.Data[userKey]
 	if !ok || len(u) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, userKey)
 	}
 	pw, ok := sec.Data[passKey]
 	if !ok || len(pw) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, passKey)
 	}
 	return resolvedCreds{Username: string(u), Password: string(pw)}, nil
@@ -1028,7 +1178,7 @@ func (r *SchemaDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.SystemNamespace = "keystone-system"
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-schemadefinition")
+		r.Recorder = eventRecorderFor(mgr, "keystone-schemadefinition")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&keystonev1alpha1.SchemaDefinition{},
@@ -1038,4 +1188,3 @@ func (r *SchemaDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("schemadefinition").
 		Complete(r)
 }
-

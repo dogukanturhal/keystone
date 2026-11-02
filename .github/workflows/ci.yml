@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
 name: CI
 
 on:
@@ -15,17 +14,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    name: build & test
+  test:
+    name: vet and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Read the toolchain from go.mod so CI cannot drift from the
-          # version the module declares.
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # Read the toolchain from go.mod, and take the newest patch release
+          # so the standard library carries the latest security fixes.
           go-version-file: go.mod
+          check-latest: true
           cache: true
 
       - name: Build
@@ -34,55 +36,92 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Unit tests
-        run: go test ./internal/... ./cmd/... -count=1
+      - name: Unit tests (race detector)
+        run: go test -race -count=1 ./internal/... ./cmd/...
 
-      # api/ is a separate module with its own go.mod, so `./...` from the
-      # repository root does not reach it.
-      - name: API module tests
+      # api/ is a separate module, so ./... from the root does not reach it.
+      - name: API module vet and tests
         working-directory: api
-        run: go test ./... -count=1
-
-      - name: gofmt (new and changed files only)
         run: |
-          # The tree carries pre-existing formatting drift from a period
-          # when the linter could not run. Gate on files this change
-          # touches rather than failing the whole build on history.
-          base="${{ github.event.pull_request.base.sha }}"
-          if [ -z "$base" ]; then
-            echo "not a pull request — skipping"; exit 0
-          fi
-          changed=$(git diff --name-only --diff-filter=ACM "$base" HEAD -- '*.go' || true)
-          [ -z "$changed" ] && { echo "no Go files changed"; exit 0; }
-          bad=$(gofmt -l $changed)
-          if [ -n "$bad" ]; then
-            echo "these changed files are not gofmt-clean:"; echo "$bad"; exit 1
-          fi
+          go vet ./...
+          go test -race -count=1 ./...
 
-  generated:
-    name: generated artifacts are current
+  lint:
+    name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          check-latest: true
           cache: true
 
-      # Regenerate, then diff. Checking `git diff` alone would only catch
-      # an uncommitted regeneration, never one that was skipped.
-      - name: Regenerate CRDs and RBAC
-        run: make generate
+      # Uses .golangci.yml from the repository root.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
 
-      - name: Regenerate API reference
-        run: make api-reference
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: govulncheck (root module)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      - name: govulncheck (api module)
+        working-directory: api
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  generated:
+    name: generated files are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      # Regenerate, then diff. Checking git diff alone would only catch an
+      # uncommitted regeneration, never one that was skipped.
+      - name: Regenerate CRDs, RBAC and API reference
+        run: |
+          make generate
+          make api-reference
 
       - name: Fail if anything changed
         run: |
           if ! git diff --quiet; then
-            echo "generated artifacts are out of date — run 'make generate api-reference' and commit:"
+            echo "generated files are out of date; run 'make generate api-reference' and commit:"
             git --no-pager diff --stat
-            git --no-pager diff | head -200
             exit 1
           fi
-          echo "generated artifacts are current"
+
+  image:
+    name: image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build manager image (not pushed)
+        run: docker build -t keystone-manager:ci .

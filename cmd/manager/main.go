@@ -43,9 +43,9 @@ import (
 	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone/internal/audit"
 	keystonecontroller "github.com/dogukanturhal/keystone/internal/controller"
+	keystonewebhook "github.com/dogukanturhal/keystone/internal/webhook"
 	pg "github.com/dogukanturhal/keystone/internal/postgres"
 	"github.com/dogukanturhal/keystone/internal/tracing"
-	keystonewebhook "github.com/dogukanturhal/keystone/internal/webhook"
 )
 
 var (
@@ -67,27 +67,28 @@ func init() {
 }
 
 type options struct {
-	role                 string
-	metricsAddr          string
-	probeAddr            string
-	leaderElect          bool
-	leaderElectID        string
-	leaderElectNamespace string
-	leaderLeaseDuration  time.Duration
-	leaderRenewDeadline  time.Duration
-	leaderRetryPeriod    time.Duration
-	cacheNamespaces      string
-	systemNamespace      string
-	driftCheckInterval   time.Duration
-	otelEndpoint         string
-	otelInsecure         bool
-	otelSampleRatio      float64
-	secureMetrics        bool
-	enableHTTP2          bool
-	startManager         bool
-	showVersion          bool
-	enableWebhooks       bool
-	enablePprof          bool
+	role                   string
+	metricsAddr            string
+	probeAddr              string
+	leaderElect            bool
+	leaderElectID          string
+	leaderElectNamespace   string
+	leaderLeaseDuration    time.Duration
+	leaderRenewDeadline    time.Duration
+	leaderRetryPeriod      time.Duration
+	cacheNamespaces        string
+	systemNamespace        string
+	driftCheckInterval     time.Duration
+	ownershipCheckInterval time.Duration
+	otelEndpoint           string
+	otelInsecure           bool
+	otelSampleRatio        float64
+	secureMetrics          bool
+	enableHTTP2            bool
+	startManager           bool
+	showVersion            bool
+	enableWebhooks         bool
+	enablePprof            bool
 	// Audit NATS JetStream exporter (T2 #25 Phase 4).
 	// auditNATSURL is the NATS server URL. When empty the NATS exporter is
 	// disabled and the existing stdout / noop path is used unchanged.
@@ -149,6 +150,8 @@ func parseFlags() *options {
 	flag.DurationVar(&o.driftCheckInterval, "drift-check-interval", time.Hour,
 		"interval between DriftController inspection passes; "+
 			"shorten for staging or chaos tests")
+	flag.DurationVar(&o.ownershipCheckInterval, "ownership-check-interval", keystonecontroller.DefaultOwnershipCheckInterval,
+		"minimum interval between object-ownership drift checks of one LogicalDatabase; 0 disables the check")
 	flag.StringVar(&o.otelEndpoint, "otel-endpoint", "",
 		"OTLP HTTP collector URL (e.g. http://otel-collector:4318); "+
 			"empty disables tracing")
@@ -166,9 +169,8 @@ func parseFlags() *options {
 			"binary prints version info and exits (safe for local smoke tests)")
 	flag.BoolVar(&o.showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&o.enableWebhooks, "enable-webhooks", true,
-		"register validating admission webhooks for MigrationBundle, "+
-			"SchemaDefinition, AuditEntry, ProductDefinition and "+
-			"ProductInstance; disable only for local integration tests "+
+		"register validating admission webhooks for MigrationBundle + "+
+			"SchemaDefinition; disable only for local integration tests "+
 			"without a webhook server (envtest starts without TLS by default)")
 	flag.BoolVar(&o.enablePprof, "enable-pprof", false,
 		"register Go runtime profiling handlers (/debug/pprof/*) on the "+
@@ -236,31 +238,6 @@ func parseFlags() *options {
 	return o
 }
 
-// roleHub is the only operator role that exists. The hub-and-spoke split
-// described in the architecture docs is not implemented: there is no
-// agent code path, and a manager started with --role=agent would run the
-// full set of reconcilers and dispatch migrations itself.
-//
-// For a component that executes schema migrations against production
-// databases, an operator believing it deployed a passive agent while a
-// second active hub runs is a genuinely dangerous outcome, so the flag
-// is validated rather than logged and ignored.
-const roleHub = "hub"
-
-// validate checks flag combinations that the flag package cannot express.
-// It returns an error rather than exiting so main() controls reporting.
-func (o *options) validate() error {
-	if o.role != roleHub {
-		return fmt.Errorf(
-			"--role=%q is not supported: only %q is implemented. Cross-cluster "+
-				"agent dispatch does not exist — a manager started with any other "+
-				"role would still run every reconciler and execute migrations "+
-				"itself, contrary to what the flag implies",
-			o.role, roleHub)
-	}
-	return nil
-}
-
 func newLogger() *zap.Logger {
 	cfg := zap.NewProductionConfig()
 	cfg.EncoderConfig.TimeKey = "ts"
@@ -322,13 +299,6 @@ func main() {
 	if o.showVersion {
 		fmt.Printf("keystone-manager %s (commit %s, built %s)\n", version, commit, date)
 		return
-	}
-
-	// Validated before the logger exists so a misconfigured role fails
-	// loudly on stderr at startup rather than being buried in JSON logs.
-	if err := o.validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
-		os.Exit(2)
 	}
 
 	logger := newLogger()
@@ -415,7 +385,7 @@ func run(o *options, logger *zap.Logger) error {
 	// T2 #25 Phase 5a — fail-fast: AUDIT_WRITE_CR=false requires AUDIT_NATS_URL.
 	// Without a durable NATS sink, every audit event would be silently dropped —
 	// no CR write, no NATS publish, no SIEM record. This violates the 7-year WORM
-	// mandate. Refuse to start rather
+	// mandate (internal engineering notes). Refuse to start rather
 	// than create a silent compliance hole. Checked here, before ctrl.NewManager,
 	// so the test in main_test.go is hermetic (no kubeconfig required).
 	if !o.auditWriteCR && o.auditNATSURL == "" {
@@ -637,6 +607,8 @@ func run(o *options, logger *zap.Logger) error {
 		SystemNamespace: o.systemNamespace,
 		AuditLogger:     auditLogger,
 		ManagerIdentity: managerIdentity,
+
+		OwnershipCheckInterval: o.ownershipCheckInterval,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup LogicalDatabaseReconciler: %w", err)
 	}
@@ -721,6 +693,8 @@ func run(o *options, logger *zap.Logger) error {
 		Scheme:          mgr.GetScheme(),
 		Pools:           pools,
 		SystemNamespace: o.systemNamespace,
+		AuditLogger:     auditLogger,
+		ManagerIdentity: managerIdentity,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup SchemaDefinitionReconciler: %w", err)
 	}
@@ -788,14 +762,8 @@ func run(o *options, logger *zap.Logger) error {
 		if err := (&keystonewebhook.SchemaDefinitionValidator{}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("setup SchemaDefinitionValidator webhook: %w", err)
 		}
-		if err := (&keystonewebhook.AuditEntryValidator{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		if err := (&keystonewebhook.AuditEntryValidator{}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("setup AuditEntryValidator webhook: %w", err)
-		}
-		if err := (&keystonewebhook.ProductDefinitionValidator{}).SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("setup ProductDefinitionValidator webhook: %w", err)
-		}
-		if err := (&keystonewebhook.ProductInstanceValidator{}).SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("setup ProductInstanceValidator webhook: %w", err)
 		}
 	}
 

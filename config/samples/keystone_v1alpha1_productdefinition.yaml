@@ -1,48 +1,36 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Sample ProductDefinition — a fictional multi-tenant SaaS product.
-#
-# A ProductDefinition is the template: it declares the databases and
-# schemas every tenant of this product needs. A ProductInstance (see
-# keystone_v1alpha1_productinstance.yaml) binds one tenant to it, and the
-# TenancyController materialises a LogicalDatabase per `databases[]` entry
-# and a DatabaseSchema per `schemas[]` entry.
-#
-# `{{tenantID}}` is substituted per instance, so each tenant gets its own
-# database names from the same definition.
+# Sample ProductDefinition — ExampleSuite, the flagship business product.
+# Replaces the legacy iam_products row with a Git-tracked CR.
 apiVersion: keystone.hexxlock.io/v1alpha1
 kind: ProductDefinition
 metadata:
-  name: example-suite
+  name: example
 spec:
-  slug: example-suite
-  displayName: "Example Suite"
+  slug: example
+  displayName: "ExampleSuite"
   defaultIsolation: bridge
   databases:
     - key: core
-      nameTemplate: "example_suite_{{tenantID}}"
+      nameTemplate: "example_{{tenantID}}"
       providerRef: example-pg
       extensions:
         - uuid-ossp
         - pgcrypto
         - pg_stat_statements
       schemas:
-        - key: catalog
-          nameTemplate: catalog
-        - key: orders
-          nameTemplate: orders
-        - key: reference_data
-          nameTemplate: reference_data
+        - key: crm
+          nameTemplate: crm
+        - key: marketing
+          nameTemplate: marketing
+        - key: invoicing
+          nameTemplate: invoicing
+        - key: master_data
+          nameTemplate: master_data
     - key: financials
-      nameTemplate: "example_suite_financials_{{tenantID}}"
+      nameTemplate: "example_financials_{{tenantID}}"
       providerRef: example-pg
-      # `isolation` is deliberately omitted. The field passes CRD validation
-      # but no controller reads it: every database is provisioned as bridge
-      # (shared database, schema-per-tenant). Declaring `silo` here would
-      # advertise a per-tenant-database guarantee Keystone does not currently
-      # provide — a dangerous thing to imply on a payments surface. Admission
-      # now rejects it outright; see the "Isolation modes" warning in
-      # README.md.
+      isolation: silo  # PCI surface — full DB isolation per tenant
       extensions:
         - uuid-ossp
         - pgcrypto
@@ -52,16 +40,13 @@ spec:
         - key: billing
           nameTemplate: billing
   apiRoutes:
-    - path: /api/v1/example-suite/catalog
-      upstreamService: example-suite-catalog
+    - path: /api/v1/example/crm
+      upstreamService: example-crm
       upstreamPort: 8080
-    - path: /api/v1/example-suite/billing
-      upstreamService: example-suite-billing
+    - path: /api/v1/example/billing
+      upstreamService: example-billing
       upstreamPort: 8080
   lifecycleHooks:
-    # Called when a ProductInstance reaches Activated. The receiving
-    # service verifies the HMAC signature using the shared secret named
-    # by signingSecretRef.
     - on: Activated
-      url: https://identity.example-system.svc.cluster.local/api/v1/lifecycle/activated
-      signingSecretRef: example-lifecycle-hmac
+      url: https://falcon-id.keystone-system.svc.cluster.local/api/v1/lifecycle/activated
+      signingSecretRef: falcon-id-lifecycle-hmac

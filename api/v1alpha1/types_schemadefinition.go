@@ -522,15 +522,15 @@ type DesiredUniqueConstraint struct {
 // Idempotent in PostgreSQL — re-issuing the same grant against the
 // same role/schema/object-type is a no-op (pg_default_acl uniqueness).
 //
-// Practical example for the example-service 2026-05-12 fix:
+// Practical example for the falcon-id 2026-05-12 fix:
 //
 //	defaultPrivileges:
 //	  - forRole: keystone_admin
-//	    toRole:  example_service_app
+//	    toRole:  falcon_id_app
 //	    objectType: tables
 //	    privileges: [SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER]
 //	  - forRole: keystone_admin
-//	    toRole:  example_service_app
+//	    toRole:  falcon_id_app
 //	    objectType: sequences
 //	    privileges: [USAGE, SELECT, UPDATE]
 type DesiredDefaultPrivilege struct {
@@ -941,7 +941,7 @@ const (
 // must be set. Mixing both is rejected by admission. SchemaRef stays
 // the default for single-tenant definitions; SchemaSelector enables
 // one SchemaDefinition to drive every DatabaseSchema in a tenant pool
-// (the realm-DB pattern in example-service, business-module DBs in example-suite,
+// (the realm-DB pattern in falcon-id, business-module DBs in examplesuite,
 // etc.) without per-tenant CR boilerplate.
 //
 // +kubebuilder:validation:XValidation:rule="(has(self.schemaRef) && self.schemaRef != '') != (has(self.schemaSelector) && self.schemaSelector != null)",message="exactly one of schemaRef or schemaSelector must be set"
@@ -1048,6 +1048,18 @@ type SchemaDefinitionSpec struct {
 	// +kubebuilder:default=false
 	AllowDestructive bool `json:"allowDestructive,omitempty"`
 
+	// RetainTables names tables the differ must never DROP, even with
+	// allowDestructive=true. A table that exists in the database but is
+	// absent from spec.tables is then left alone (the differ records a
+	// warning) instead of being planned for removal. Use for tables owned
+	// outside this SchemaDefinition: hand-written migrations, other
+	// services, or legacy tables awaiting an explicit decision.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxItems=1024
+	// +listType=set
+	RetainTables []string `json:"retainTables,omitempty"`
+
 	// DefaultPrivileges declares per-role `ALTER DEFAULT PRIVILEGES`
 	// that should hold against this schema. Every entry expands at
 	// reconcile time to:
@@ -1056,11 +1068,11 @@ type SchemaDefinitionSpec struct {
 	//     IN SCHEMA <Schema OR sd.targetSchema>
 	//     GRANT <Privileges> ON <ObjectType> TO <ToRole>;
 	//
-	// Why this exists (gap surfaced 2026-05-12 on example-service migration
+	// Why this exists (gap surfaced 2026-05-12 on falcon-id migration
 	// 234): the operator-emitted bundles run CREATE TABLE as the
 	// keystone_admin role. Pre-Keystone default-privileges were set
 	// for the `postgres` role, so any keystone_admin-created table
-	// silently dropped out of the example_service_app grant chain. The
+	// silently dropped out of the falcon_id_app grant chain. The
 	// BackchannelLogoutDrainer spammed SQLSTATE 42501 every 5s until
 	// a hand-authored migration bundle re-pointed ALTER DEFAULT
 	// PRIVILEGES at keystone_admin. With DefaultPrivileges declared
@@ -1085,7 +1097,7 @@ type SchemaDefinitionSpec struct {
 	// PolicyRef is the SchemaPolicy the reconciler stamps onto the
 	// auto-generated MigrationBundle. When empty, the default
 	// "production-safety" policy is applied — this matches the value
-	// used by every hand-authored bundle in the GitOps repository
+	// used by every hand-authored bundle in the the GitOps repository repo
 	// and ensures the downstream MigrationBundle controller has a
 	// policy to look up (without a policyRef, the bundle pipeline
 	// stalls before creating a MigrationPlan).
@@ -1236,7 +1248,7 @@ type SchemaDefinitionStatus struct {
 	// it onto DatabaseSchema.Status.LastAppliedFingerprint when a
 	// MigrationExecution succeeds for that schema.
 	//
-	// SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) compare
+	// SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare
 	// this against per-schema LastAppliedFingerprint to verify
 	// convergence in an identity-based, race-free way.
 	//

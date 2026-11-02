@@ -12,7 +12,7 @@
 # CONTENTS
 # ========
 #   - keystonectl (built from this repo — CI jobs and the ORM
-#     migration-drift check in your shared CI templates run it)
+#     migration-drift check in <your-org>/shared-ci-templates run it)
 #   - kubectl (matching cluster version)
 #   - cosign  (matching keystone CI sign-image stage)
 #   - busybox sh + standard POSIX utilities (ash, date, sha256sum,
@@ -43,7 +43,7 @@ ARG ALPINE_VERSION=3.21
 # so four findings remain and are carried in .trivyignore.yaml until
 # upstream rebuilds — nothing in this repo can move a vendored dep in a
 # binary we download.
-ARG KUBECTL_VERSION=v1.37.0
+ARG KUBECTL_VERSION=v1.37.1
 # v3.0.6 carries go.opentelemetry.io/otel v1.41.0 which fixes
 # CVE-2026-29181 (multi-value baggage header DoS amplification). v2.6.3
 # pinned otel v1.38.0 and tripped the trivy HIGH-severity gate on
@@ -51,19 +51,32 @@ ARG KUBECTL_VERSION=v1.37.0
 # 2026-08-02 bumped v3.1.1 -> v3.1.2. Same story: go1.26.4 clears
 # CVE-2026-27145, while x/text v0.38.0, grpc v1.82.0 and the stdlib still
 # sit just below the fixed versions. See .trivyignore.yaml.
-ARG COSIGN_VERSION=v3.1.2
+# 2026-09-21 bumped v3.1.2 -> v3.1.3 (latest release, 2026-08-06): fixes
+# GHSA-fx35-mq7g-6g98 (signature verification bypass via an unexpected
+# public key in a legacy bundle). Does NOT move the pipeline's 13
+# UNLISTED findings from this same run — confirmed against the v3.1.3
+# tag's go.mod: golang.org/x/crypto stays at v0.53.0, golang.org/x/mod at
+# v0.37.0, google.golang.org/grpc at v1.82.0, all identical to v3.1.2.
+# Upstream tracking: https://github.com/sigstore/cosign/issues/5084
+# (x/crypto bump, open). Those 13 CVEs are carried in .trivyignore.yaml
+# with a 2026-11-20 expiry until sigstore ships a rebuild.
+ARG COSIGN_VERSION=v3.1.4
 
-ARG GO_VERSION=1.26.5
+# Mirrors the manager's Dockerfile GO_VERSION bump (1.26.5 -> 1.26.8,
+# 2026-09-21) for the same 8 HIGH stdlib CVEs fixed in 1.26.6+; see
+# Dockerfile for the CVE list. keystonectl is built from this repo's own
+# source (not vendored), so the bump applies the same way it does there.
+# Keep compiled keystonectl aligned with the manager's fixed stdlib.
+ARG GO_VERSION=1.26.10
 
 # keystonectl build stage. The tools image is what CI jobs run in, and the
-# migration-drift check in your shared CI templates needs keystonectl —
+# migration-drift check in <your-org>/shared-ci-templates needs keystonectl —
 # an image whose whole purpose is tooling should carry the project's own
 # CLI rather than make every consumer `go install` it behind a PAT.
 # Mirrors the manager's build stage (see Dockerfile) so the two binaries
 # are produced identically.
 FROM mirror.gcr.io/library/golang:${GO_VERSION}-alpine AS gobuild
 RUN apk add --no-cache git
-    fi
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY api/go.mod api/go.sum ./api/
@@ -108,7 +121,7 @@ LABEL org.opencontainers.image.title="keystone-tools" \
 # Only ca-certificates — busybox provides everything else. No bash,
 # no jq, no curl in the runtime layer (the soak script uses kubectl
 # subcommands and cosign verify exclusively for HTTPS work).
-RUN apk add --no-cache ca-certificates
+RUN apk upgrade --no-cache && apk add --no-cache ca-certificates
 
 COPY --from=fetch --chown=65532:65532 /tmp/kubectl /usr/local/bin/kubectl
 COPY --from=fetch --chown=65532:65532 /tmp/cosign-linux-amd64 /usr/local/bin/cosign

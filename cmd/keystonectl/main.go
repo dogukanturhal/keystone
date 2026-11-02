@@ -183,7 +183,7 @@ type inspectOpts struct {
 	dsn               string
 	schema            string
 	schemaRef         string
-	schemaSelector    string // comma-separated key=value pairs, e.g. "scope=example-service,tier=tenant"
+	schemaSelector    string // comma-separated key=value pairs, e.g. "scope=falcon-id,tier=tenant"
 	name              string // SchemaDefinition metadata.name override (required when --schema-selector is set)
 	output            string
 	stripDanglingRefs bool // strip FKs/triggers/views that reference identifiers not declared in the same SD
@@ -196,7 +196,7 @@ func runInspect(args []string) error {
 	fs.StringVar(&o.dsn, "dsn", os.Getenv("KEYSTONECTL_DSN"), "PostgreSQL connection string (or env KEYSTONECTL_DSN)")
 	fs.StringVar(&o.schema, "schema", "public", "schema name to inspect")
 	fs.StringVar(&o.schemaRef, "schema-ref", "", "DatabaseSchema CR name the output references (single-target form; default: inferred from --schema). Mutually exclusive with --schema-selector.")
-	fs.StringVar(&o.schemaSelector, "schema-selector", "", "Label selector for fan-out form, comma-separated key=value pairs (e.g. \"scope=example-service,tier=tenant\"). Mutually exclusive with --schema-ref. Requires --name.")
+	fs.StringVar(&o.schemaSelector, "schema-selector", "", "Label selector for fan-out form, comma-separated key=value pairs (e.g. \"scope=falcon-id,tier=tenant\"). Mutually exclusive with --schema-ref. Requires --name.")
 	fs.StringVar(&o.name, "name", "", "SchemaDefinition metadata.name (required when --schema-selector is set; default: <schema-ref>-desired in --schema-ref mode)")
 	fs.StringVar(&o.output, "output", "yaml", "output format: yaml | json")
 	fs.BoolVar(&o.stripDanglingRefs, "strip-dangling-refs", false,
@@ -267,9 +267,10 @@ func runInspect(args []string) error {
 
 // danglingReport collects the curation-class drift the inspector is
 // allowed to detect in the snapshot-to-spec pipeline. The classes
-// correspond to three problem patterns first identified by a
-// service-specific curation script that this inspector extension
-// absorbs upstream as a generic feature.
+// correspond to the three problem patterns documented in
+// <gitops-repo>/keystone/resources/falcon-id/curate-tenant-sd.py
+// (the in-tree falcon-id-specific curate script that this inspector
+// extension absorbs upstream as a generic feature).
 type danglingReport struct {
 	// danglingFKs[i] = "table.fk_name -> referencesTable"
 	danglingFKs []string
@@ -293,23 +294,23 @@ func (r *danglingReport) WriteWarnings(w io.Writer, stripped bool) {
 		verb = "stripped"
 	}
 	for _, x := range r.danglingFKs {
-		fmt.Fprintf(w, "level=warn class=dangling-fk verb=%s detail=%q\n", verb, x)
+		_, _ = fmt.Fprintf(w, "level=warn class=dangling-fk verb=%s detail=%q\n", verb, x)
 	}
 	for _, x := range r.emptyViews {
-		fmt.Fprintf(w, "level=warn class=empty-view verb=%s detail=%q\n", verb, x)
+		_, _ = fmt.Fprintf(w, "level=warn class=empty-view verb=%s detail=%q\n", verb, x)
 	}
 	for _, x := range r.danglingTriggers {
-		fmt.Fprintf(w, "level=warn class=dangling-trigger verb=%s detail=%q\n", verb, x)
+		_, _ = fmt.Fprintf(w, "level=warn class=dangling-trigger verb=%s detail=%q\n", verb, x)
 	}
 	if r.Total() == 0 {
 		return
 	}
 	if stripped {
-		fmt.Fprintf(w, "level=info class=summary detail=%q\n",
+		_, _ = fmt.Fprintf(w, "level=info class=summary detail=%q\n",
 			fmt.Sprintf("stripped %d dangling-fks, %d empty-views, %d dangling-triggers from spec",
 				len(r.danglingFKs), len(r.emptyViews), len(r.danglingTriggers)))
 	} else {
-		fmt.Fprintf(w, "level=info class=summary detail=%q\n",
+		_, _ = fmt.Fprintf(w, "level=info class=summary detail=%q\n",
 			fmt.Sprintf("flagged %d dangling-fks, %d empty-views, %d dangling-triggers — pass --strip-dangling-refs to remove from output",
 				len(r.danglingFKs), len(r.emptyViews), len(r.danglingTriggers)))
 	}
@@ -469,7 +470,6 @@ type diffOpts struct {
 	schema   string
 	desired  string
 	format   string
-	showSQL  bool
 	showWarn bool
 }
 

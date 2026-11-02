@@ -6,14 +6,14 @@ Keystone is an AGPL-3.0-or-later PostgreSQL schema operator.
 This document pre-fills the answers for the OpenSSF Best Practices badge application
 at https://www.bestpractices.dev/en/projects/new.
 
-Once the GitHub mirror at `github.com/hexxlock/keystone` is live, apply for the badge
+Once the GitHub mirror at `github.com/dogukanturhal/keystone` is live, apply for the badge
 at that URL and paste these answers. The badge is free and publicly verifiable.
 
 ## Application Details
 
 | Field | Value |
 |---|---|
-| Project URL | https://github.com/hexxlock/keystone (mirror; canonical: https://github.com/dogukanturhal/platform) |
+| Project URL | https://github.com/dogukanturhal/keystone |
 | Project name | Keystone |
 | Description | AGPL-3.0-or-later Kubernetes operator for PostgreSQL schema lifecycle management |
 | License | AGPL-3.0-or-later |
@@ -29,7 +29,7 @@ Reference: `LICENSE` in `services/keystone/`.
 `SPDX-License-Identifier: AGPL-3.0-or-later`.
 
 **interact**: The project accepts bug reports and feature requests via GitLab Issues
-at https://github.com/dogukanturhal/platform/issues (label: `keystone`).
+at https://github.com/dogukanturhal/keystone/issues (label: `keystone`).
 
 **contribution**: Contribution process is documented in `CONTRIBUTING.md` at the
 repository root. All commits must carry a `Signed-off-by:` DCO trailer (enforced via
@@ -46,13 +46,13 @@ every commit references an issue or MR.
 **repo_interim**: Active development on the `master` branch. Release tags follow
 `keystone/vX.Y.Z` semver.
 
-**repo_distributed**: Mirrored to `github.com/hexxlock/keystone` (planned).
+**repo_distributed**: Mirrored to `github.com/dogukanturhal/keystone` (planned).
 
 ### Reporting
 
 **vulnerability_report_process**: Documented in `SECURITY.md` at repository root.
 Security findings can be reported via GitLab confidential issues or by emailing
-`security@hexxlock.com`. Response SLA: 5 business days for acknowledgement.
+`dogukanturhal@hexxlock.com`. Response SLA: 5 business days for acknowledgement.
 
 ### Quality
 
@@ -69,7 +69,7 @@ every pipeline run.
 **test_invocation**: `make test` (runs `go test -race -count=1 ./...` with envtest).
 
 **test_continuous_integration**: Tests run on every MR pipeline (`keystone:test`-adjacent
-via the workspace-level `test:` job in the CI configuration).
+via the workspace-level `test:` job in `.gitlab-ci.yml`).
 
 **run_tests_as_users**: Tests run without elevated privileges. envtest spins up a local
 API server without cluster access.

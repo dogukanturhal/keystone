@@ -99,7 +99,7 @@ go mod tidy && go build ./... && go test ./...
 git commit -am "chore(deps): pin keystone/api v0.1.3" && git push
 git tag go/v0.3.0 && git push origin go/v0.3.0
 #    Slash, not hyphen: Go's path-suffix rule makes `go-vX.Y.Z`
-#    silently unresolvable. The CI comment in the CI configuration has the detail.
+#    silently unresolvable. The CI comment in .gitlab-ci.yml has the detail.
 
 # 3. operator — repin to the tagged SDK, verify, merge.
 cd keystone

@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,16 +32,16 @@ import (
 //
 // Depends on the LogicalDatabase being Ready first — otherwise waits and
 // requeues. Each reconcile:
-//   1. resolves LogicalDatabase + DatabaseProvider via cross-CR refs,
-//   2. dials the target database (NOT maintenance) with admin creds,
-//   3. ensures the owner role + schema + grants + default privileges.
+//  1. resolves LogicalDatabase + DatabaseProvider via cross-CR refs,
+//  2. dials the target database (NOT maintenance) with admin creds,
+//  3. ensures the owner role + schema + grants + default privileges.
 //
 // Idempotent throughout. Failures set Ready=False with a structured
 // reason; controller-runtime backs off and retries.
 type DatabaseSchemaReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Pools    *pg.PoolCache
 
 	// AuditLogger appends tamper-evident entries on success/fail.
@@ -78,7 +77,7 @@ func (r *DatabaseSchemaReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if err := r.Update(ctx, &schema); err != nil {
 			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	// Ensure keystone.hexxlock.io/name label matches the CR's name. The
@@ -87,7 +86,7 @@ func (r *DatabaseSchemaReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// without it would never match any bundle and no MigrationExecution
 	// would ever fire. Self-healing the label here means operators can
 	// create DSs with the minimal spec and the bundle pipeline still
-	// works. Tracked from an incident where a large batch of SDs sat in
+	// works. Tracked the original incident where 34 ExampleSuite SDs sat in
 	// "Progressing" with MATCHED=0 because every DS lacked this label.
 	if schema.Labels == nil {
 		schema.Labels = map[string]string{}
@@ -98,7 +97,7 @@ func (r *DatabaseSchemaReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if err := r.Patch(ctx, &schema, patch); err != nil {
 			return ctrl.Result{}, fmt.Errorf("label keystone.hexxlock.io/name: %w", err)
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	// Resolve the parent LogicalDatabase (same namespace).
@@ -258,12 +257,12 @@ func (r *DatabaseSchemaReconciler) resolveCredentials(ctx context.Context, p *ke
 	}
 	u, ok := sec.Data[userKey]
 	if !ok || len(u) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, userKey)
 	}
 	pw, ok := sec.Data[passKey]
 	if !ok || len(pw) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, passKey)
 	}
 	return resolvedCreds{Username: string(u), Password: string(pw)}, nil
@@ -350,7 +349,7 @@ func (r *DatabaseSchemaReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.SystemNamespace = "keystone-system"
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-databaseschema")
+		r.Recorder = eventRecorderFor(mgr, "keystone-databaseschema")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&keystonev1alpha1.DatabaseSchema{},

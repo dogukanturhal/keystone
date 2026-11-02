@@ -3,16 +3,17 @@
 package devdb
 
 import (
+	"context"
 	"testing"
 
-	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
-	"github.com/dogukanturhal/keystone-sdk/go/drift"
 	"github.com/dogukanturhal/keystone-sdk/go/analyze"
+	"github.com/dogukanturhal/keystone-sdk/go/drift"
+	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 )
 
 func TestSemanticAnalyzer_NilPool(t *testing.T) {
 	a := NewSemanticAnalyzer(nil)
-	findings, err := a.Check(nil, &analyze.Migration{
+	findings, err := a.Check(context.Background(), &analyze.Migration{
 		Files: []analyze.FileBody{{Name: "001.sql", Body: "CREATE TABLE t (id int)"}},
 	})
 	if err != nil {
@@ -25,7 +26,7 @@ func TestSemanticAnalyzer_NilPool(t *testing.T) {
 
 func TestSemanticAnalyzer_NoFiles(t *testing.T) {
 	a := NewSemanticAnalyzer(&Pool{})
-	findings, err := a.Check(nil, &analyze.Migration{})
+	findings, err := a.Check(context.Background(), &analyze.Migration{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

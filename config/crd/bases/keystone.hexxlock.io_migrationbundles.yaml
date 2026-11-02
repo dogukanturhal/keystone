@@ -163,7 +163,7 @@ spec:
                       repository:
                         description: |-
                           Repository is the full OCI reference without the tag/digest,
-                          e.g., "ghcr.io/dogukanturhal/migrations/billing".
+                          e.g., "registry.example.com/migrations/billing".
                         maxLength: 512
                         type: string
                       tag:
@@ -546,7 +546,7 @@ spec:
                       repository:
                         description: |-
                           Repository is the full OCI reference without the tag/digest,
-                          e.g., "ghcr.io/dogukanturhal/migrations/billing".
+                          e.g., "registry.example.com/migrations/billing".
                         maxLength: 512
                         type: string
                       tag:
@@ -760,10 +760,19 @@ spec:
                 x-kubernetes-list-type: map
               contentHash:
                 description: |-
-                  ContentHash is the SHA-256 of the resolved source content at the
-                  last reconcile. Used by the admission webhook to detect
+                  ContentHash is the SHA-256 of the resolved source content pinned for
+                  ContentHashVersion. Used by the admission webhook to detect
                   version-pinning violations (same Version, different SQL).
                 maxLength: 64
+                type: string
+              contentHashVersion:
+                description: |-
+                  ContentHashVersion is the spec.version to which ContentHash belongs.
+                  Empty on legacy objects: the controller recovers the last pinned
+                  version from executions or the last Planned condition, falling back
+                  to spec.version when no historical evidence exists.
+                  No default: existing objects must retain their legacy meaning.
+                maxLength: 253
                 type: string
               currentStage:
                 description: |-

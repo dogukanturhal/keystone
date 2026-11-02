@@ -32,6 +32,10 @@ spec:
     - jsonPath: .status.sizeBytes
       name: Size
       type: string
+    - jsonPath: .status.conditions[?(@.type=="OwnershipDrift")].status
+      name: OwnershipDrift
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -141,7 +145,7 @@ spec:
                   Name is the actual PostgreSQL database name. Distinct from
                   metadata.name: PG identifiers commonly use underscores (e.g.
                   example_suite) while Kubernetes resources prefer hyphens
-                  (example-suite). Required so this never has to be inferred.
+                  (examplesuite). Required so this never has to be inferred.
                 maxLength: 63
                 pattern: ^[a-z_][a-z0-9_]*$
                 type: string
@@ -216,6 +220,29 @@ spec:
                 - key
                 type: object
                 x-kubernetes-map-type: atomic
+              ownershipRemediation:
+                description: |-
+                  OwnershipRemediation overrides the DatabaseProvider's
+                  spec.ownershipRemediation for this database. Empty (the default)
+                  inherits the provider's setting; the provider defaults to Report.
+
+                    Report                      — only report OwnershipDrift (condition,
+                                                  status summary, metrics).
+                    ReassignFromConnectionRole  — additionally ALTER ... OWNER TO
+                                                  spec.ownerRole for drifted objects
+                                                  currently owned by the provider's
+                                                  connection role. Objects owned by any
+                                                  other role, RLS-unforced tables, views
+                                                  and partition/inheritance children that
+                                                  depend on RLS tables,
+                                                  SECURITY DEFINER routines, owned
+                                                  sequences and schemas stay report-only.
+
+                  Deliberately has no default so "unset" can mean "inherit".
+                enum:
+                - Report
+                - ReassignFromConnectionRole
+                type: string
               providerRef:
                 description: |-
                   ProviderRef is the name of the DatabaseProvider hosting this
@@ -235,7 +262,7 @@ spec:
                   databases.
 
                   Override when adopting Keystone on a database that already has a
-                  migrator managing its own `schema_migrations`. Example Service is the
+                  migrator managing its own `schema_migrations`. Falcon-ID is the
                   canonical example: its existing table has `version INTEGER PK`
                   while Keystone's runner uses `version TEXT PK`. Setting
                   trackingTableName to "keystone_schema_migrations" lets both
@@ -342,6 +369,74 @@ spec:
                   leaks credentials.
                 maxLength: 64
                 type: string
+              ownershipDrift:
+                description: |-
+                  OwnershipDrift summarises the last ownership check: objects inside
+                  the managed schemas whose owner is not the expected role. Report-only
+                  by default; it never gates Ready. See the OwnershipDrift condition.
+                properties:
+                  driftedObjects:
+                    description: DriftedObjects is the total number of objects with
+                      an unexpected owner.
+                    format: int32
+                    type: integer
+                  expectedOwner:
+                    description: ExpectedOwner is spec.ownerRole at the time of the
+                      check.
+                    maxLength: 256
+                    type: string
+                  groups:
+                    description: Groups breaks the drift down by (kind, current owner).
+                    items:
+                      description: OwnershipDriftGroup is one (kind, owner) bucket
+                        of drifted objects.
+                      properties:
+                        count:
+                          description: Count is the number of objects in this bucket.
+                          format: int32
+                          type: integer
+                        kind:
+                          description: Kind is the object kind (table, function, enum,
+                            ...).
+                          maxLength: 256
+                          type: string
+                        owner:
+                          description: Owner is the current owning role.
+                          maxLength: 256
+                          type: string
+                        remediable:
+                          description: Remediable is how many of them the operator
+                            may reassign.
+                          format: int32
+                          type: integer
+                        sample:
+                          description: Sample lists a few schema-qualified identifiers
+                            from the bucket.
+                          items:
+                            maxLength: 256
+                            type: string
+                          maxItems: 5
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - count
+                      - kind
+                      - owner
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  lastCheckTime:
+                    description: LastCheckTime is when the check last completed.
+                    format: date-time
+                    type: string
+                  remediable:
+                    description: |-
+                      Remediable is how many of those the operator could reassign when
+                      remediation is enabled (owned by the connection role, not blocked).
+                    format: int32
+                    type: integer
+                type: object
               resolvedEndpoint:
                 description: |-
                   ResolvedEndpoint is the host:port the controller resolved from the

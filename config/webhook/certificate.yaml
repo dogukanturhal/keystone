@@ -11,22 +11,9 @@ spec:
   dnsNames:
     - keystone-manager-webhook.keystone-system.svc
     - keystone-manager-webhook.keystone-system.svc.cluster.local
-  # The issuer must already exist — neither this overlay nor the Helm
-  # chart ships one, so an install against a cluster without it leaves the
-  # Certificate stuck Pending and the webhook server without a serving
-  # cert. Matches the chart default (webhook.certManager.issuerRef); point
-  # both at whatever issuer your cluster uses.
-  #
-  # For a standalone install, a self-signed issuer is enough:
-  #   kubectl apply -f - <<'EOF'
-  #   apiVersion: cert-manager.io/v1
-  #   kind: Issuer
-  #   metadata: {name: selfsigned, namespace: keystone-system}
-  #   spec: {selfSigned: {}}
-  #   EOF
   issuerRef:
-    name: selfsigned
-    kind: Issuer
+    name: exampletenant
+    kind: ClusterIssuer
   privateKey:
     encoding: PKCS8
     algorithm: ECDSA

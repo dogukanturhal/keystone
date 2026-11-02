@@ -25,16 +25,16 @@ us, you get added. We do not rank or feature adopters.
   the shape of the deployment.
 
 If you are running Keystone but cannot go public (regulated sector, NDA), email
-`maintainers@hexxlock.com` anyway — we keep a private roster for our own
+`dogukanturhal@hexxlock.com` anyway — we keep a private roster for our own
 roadmap prioritisation and you will not appear in this file.
 
 ## Adopters
 
 | Organisation | Status | Use case | Since | Contact | Notes |
 |---|---|---|---|---|---|
-| HexxLock Platform (Example Service) | Adopting, Q2 2026 | PostgreSQL schema management for the Example Service IAM service; first in-flight cutover from the legacy `db-migrator` / `db-provisioner` stack | 2026-04 | `platform@hexxlock.com` | Cutover planned this quarter; not yet fully migrated. |
-| _[Pending — contact maintainers@hexxlock.com to be added]_ | — | — | — | — | — |
-| _[Pending — contact maintainers@hexxlock.com to be added]_ | — | — | — | — | — |
+| HexxLock Platform (Falcon-ID) | Adopting, Q2 2026 | PostgreSQL schema management for the Falcon-ID IAM service; first in-flight cutover from the legacy `db-migrator` / `db-provisioner` stack | 2026-04 | `platform@example.com` | Cutover planned this quarter; not yet fully migrated. |
+| _[Pending — contact dogukanturhal@hexxlock.com to be added]_ | — | — | — | — | — |
+| _[Pending — contact dogukanturhal@hexxlock.com to be added]_ | — | — | — | — | — |
 
 **Legend for status**:
 
@@ -46,15 +46,15 @@ roadmap prioritisation and you will not appear in this file.
   least one production PostgreSQL workload.
 
 The HexxLock Platform entry is `Adopting` rather than `Production` on purpose.
-Example Service has not yet retired its embedded `.Migrate()` calls (Phase 3.2 of
+Falcon-ID has not yet retired its embedded `.Migrate()` calls (Phase 3.2 of
 the roadmap); until it does, the honest label is Adopting. The entry will
-advance to `Production` when Example Service's legacy paths are removed and the
+advance to `Production` when Falcon-ID's legacy paths are removed and the
 `services/db-migrator` / `services/db-provisioner` deployments are scaled to
 zero (Phase 4.2 + 8.1).
 
 ## How to be added
 
-Email `maintainers@hexxlock.com` with:
+Email `dogukanturhal@hexxlock.com` with:
 
 ```
 Subject: [ADOPTERS] <Organisation> — Keystone adopter entry
@@ -89,7 +89,7 @@ Per the CNCF TOC incubation application template, adopters should be
 
 ### Removal and opt-out policy
 
-Email `maintainers@hexxlock.com` with subject `[ADOPTERS] remove <Organisation>`
+Email `dogukanturhal@hexxlock.com` with subject `[ADOPTERS] remove <Organisation>`
 and we will open an MR removing the row. No questions asked, no reason
 required, no waiting period. The MR will merge on lazy consensus within seven
 days (per `GOVERNANCE.md`); if you need a same-day removal, say so and we

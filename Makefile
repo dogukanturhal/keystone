@@ -24,7 +24,7 @@ CONTROLLER_GEN_VERSION ?= v0.20.1
 KUSTOMIZE_VERSION      ?= v5.4.3
 ENVTEST_VERSION        ?= release-0.19
 ENVTEST_K8S_VERSION    ?= 1.31.0
-GOLANGCI_LINT_VERSION  ?= v1.61.0
+GOLANGCI_LINT_VERSION  ?= v2.11.4
 CRD_REF_DOCS_VERSION   ?= v0.2.0
 
 # Local tool installation (pinned binaries under bin/)
@@ -152,10 +152,10 @@ lint-sql: ## Run squawk on SQL files (pass paths as ARGS=)
 #
 # Both tools run via Docker to avoid requiring local installs.
 # Mirrors the keystone:gosec and keystone:semgrep CI jobs exactly.
-# Digest placeholders match what is baked into the CI configuration — update both
+# Digest placeholders match what is baked into .gitlab-ci.yml — update both
 # locations together when pinning.
 #
-# SAST image digest placeholders (fill in alongside the CI configuration pins):
+# SAST image digest placeholders (fill in alongside .gitlab-ci.yml pins):
 #   securego/gosec:2.21.4     @sha256:__REPLACE_ME__
 #   semgrep/semgrep:1.72.0    @sha256:__REPLACE_ME__
 
@@ -283,7 +283,7 @@ $(ENVTEST): | $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Install golangci-lint
 $(GOLANGCI_LINT): | $(LOCALBIN)
-	GOBIN=$(LOCALBIN) $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	GOBIN=$(LOCALBIN) $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: crd-ref-docs
 crd-ref-docs: $(CRD_REF_DOCS) ## Install crd-ref-docs (elastic/crd-ref-docs) for API reference generation

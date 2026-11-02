@@ -220,6 +220,9 @@ metrics:
     reconcileSuccessObjective: 0.995
     # -- MigrationExecution apply latency objective (seconds, p99).
     migrationApplyP99Seconds: 30
+    # -- Expected --ownership-check-interval of the manager (seconds); the
+    # KeystoneOwnershipCheckStale alert fires after 3x this.
+    ownershipCheckIntervalSeconds: 1800
   pprof:
     # -- Expose Go runtime profiling endpoints (/debug/pprof/*) on the
     # metrics server. Inherits the same TLS + TokenReview +
@@ -266,7 +269,7 @@ webhook:
     # -- Renew before expiry.
     renewBefore: 360h
     # -- Private key algorithm + encoding. PKCS8 is required for Linkerd
-    # compatibility (Linkerd requires PKCS#8-encoded keys).
+    # compatibility (see internal engineering notes).
     privateKey:
       algorithm: ECDSA
       size: 256

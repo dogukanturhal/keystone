@@ -65,7 +65,7 @@ func TestLogicalDatabaseReconciler_AddsFinalizer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
-	if !res.Requeue {
+	if res.RequeueAfter <= 0 {
 		t.Errorf("expected Requeue=true after finalizer add; got %+v", res)
 	}
 
@@ -451,7 +451,7 @@ func TestHashPasswordSHA256_DistinguishesContent(t *testing.T) {
 
 func isHex(s string) bool {
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}

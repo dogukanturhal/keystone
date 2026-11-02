@@ -8,7 +8,7 @@ import (
 )
 
 // Stage-level metrics emitted by the staged rollout reconciler. Pair
-// with the burn-rate alerts shipped in your GitOps repository.
+// with the burn-rate alerts in <gitops-repo>/keystone/observability.
 var (
 	rolloutStageStarted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
