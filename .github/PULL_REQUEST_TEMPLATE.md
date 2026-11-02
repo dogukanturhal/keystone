@@ -12,3 +12,5 @@
 - [ ] Tests added or updated
 - [ ] `make generate api-reference` run and the output committed, if API types changed
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` for user-visible changes
+- [ ] This PR does one thing and is under 400 changed lines
+- [ ] AI assistance (if any) is described above

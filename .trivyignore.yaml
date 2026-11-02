@@ -29,50 +29,25 @@
 #   4. If not, extend expired_at with the date checked.
 
 vulnerabilities:
-  # --- kubectl v1.37.1 (newest release; vendors x/text v0.40.0, built on go1.26.8)
+  # --- kubectl v1.37.2 (newest release; vendors x/text v0.40.0 and x/net
+  # v0.57.0, built on go1.26.10). Checked 2026-11-02 with `go version -m`.
+  # cosign v3.1.4 (go1.27.3, x/net 0.61.0, x/text 0.43.0) needs nothing here.
   - id: CVE-2026-56851
     paths:
       - usr/local/bin/kubectl
     statement: >-
-      golang.org/x/text v0.40.0 vendored in the upstream kubectl v1.37.1
-      binary; fixed in v0.41.0. v1.37.1 is the newest kubectl release
-      (2026-10-29), so bumping our ARG cannot move it. Clears when upstream
-      ships a release built against x/text >= 0.41.0.
-    expired_at: 2026-11-30
-  - id: CVE-2026-111943
-    paths:
-      - usr/local/bin/kubectl
-    statement: >-
-      Go stdlib in the upstream kubectl v1.37.1 binary (go1.26.8); fixed in
-      go1.26.10 / 1.27.3. Newest release as of 2026-10-29. keystonectl is
-      built by us and moves to go1.26.10 in Dockerfile.tools, so only the
-      kubectl path is excepted.
-    expired_at: 2026-11-30
-  - id: CVE-2026-78667
-    paths:
-      - usr/local/bin/kubectl
-      - usr/local/bin/cosign
-    statement: >-
-      Go stdlib in upstream binaries (cosign v3.1.3 on go1.26.4, kubectl
-      v1.37.1 on go1.26.8); fix lands in go1.26.9 / 1.27.2. Checked
-      2026-10-15: no rebuilt release exists. Clears when upstream ships on
-      go1.26.9+.
-    expired_at: 2026-11-20
+      golang.org/x/text v0.40.0 vendored in the upstream kubectl v1.37.2
+      binary; fixed in v0.41.0. v1.37.2 is the newest kubectl release, so
+      bumping our ARG cannot move it. Checked 2026-11-02. Clears when
+      upstream ships a release built against x/text >= 0.41.0.
+    expired_at: 2027-01-15
   - id: CVE-2026-78669
     paths:
       - usr/local/bin/kubectl
-      - usr/local/bin/cosign
     statement: >-
-      Go stdlib (go1.26.4 / go1.26.8) and golang.org/x/net (cosign v0.56.0,
-      kubectl v0.57.0; fixed in 0.60.0) vendored by the upstream binaries.
-      Checked 2026-10-15: newest cosign v3.1.3 and kubectl v1.37.1 are not
-      rebuilt. Clears when upstream ships on go1.26.9+ / x/net 0.60.0+.
-    expired_at: 2026-11-20
-  - id: CVE-2026-97031
-    paths:
-      - usr/local/bin/kubectl
-      - usr/local/bin/cosign
-    statement: >-
-      Same go1.26.4 / go1.26.8 stdlib as CVE-2026-78667 above; fix in
-      go1.26.9 / 1.27.2. Checked 2026-10-15: no rebuilt release exists.
-    expired_at: 2026-11-20
+      golang.org/x/net v0.57.0 vendored in the upstream kubectl v1.37.2
+      binary; fixed in 0.60.0. The stdlib half of this CVE is cleared
+      (kubectl is now on go1.26.10) and cosign v3.1.4 vendors x/net 0.61.0,
+      so only the kubectl path is excepted. Checked 2026-11-02. Clears when
+      upstream ships a kubectl built against x/net >= 0.60.0.
+    expired_at: 2027-01-15
