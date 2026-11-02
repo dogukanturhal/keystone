@@ -14,7 +14,7 @@ go 1.26.10
 replace github.com/dogukanturhal/keystone/api => ./api
 
 require (
-	github.com/dogukanturhal/keystone/api v0.2.2-0.20261102130332-ebe5988b6711
+	github.com/dogukanturhal/keystone/api v0.3.0
 	github.com/go-logr/logr v1.4.4
 	github.com/google/cel-go v0.26.0
 	github.com/minio/minio-go/v7 v7.0.84
@@ -53,7 +53,7 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/dogukanturhal/keystone-sdk/go v0.4.1-0.20261102132040-d3ec28d5a19a
+	github.com/dogukanturhal/keystone-sdk/go v0.5.0
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
