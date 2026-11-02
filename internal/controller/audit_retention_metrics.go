@@ -11,8 +11,8 @@ import (
 // the controller-runtime global registry on package init() so the
 // manager's /metrics endpoint exposes them automatically.
 //
-// Operator alerting playbook (PrometheusRule ships separately, in
-// your GitOps repository):
+// Operator alerting playbook (PrometheusRule landing in
+// the GitOps repository in a separate MR):
 //
 //   - keystone_audit_archive_lag_seconds > 86400 for 1h
 //     => archive backend down or misconfigured; expired entries

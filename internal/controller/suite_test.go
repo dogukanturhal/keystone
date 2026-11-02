@@ -38,7 +38,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -46,9 +45,8 @@ import (
 )
 
 var (
-	cfg        *rest.Config
-	testEnv    *envtest.Environment
-	testScheme = ctrl.GetConfigOrDie // placeholder; overridden in TestMain
+	cfg     *rest.Config
+	testEnv *envtest.Environment
 )
 
 // repoRoot walks up from this file to find services/keystone root so
@@ -71,6 +69,10 @@ func repoRoot(t *testing.T) string {
 // (etcd + kube-apiserver) aren't installed. Run `make envtest` to
 // download them; CI should run that in its setup phase.
 func StartEnvtest(t *testing.T) (client.Client, func()) {
+	return startEnvtest(t, false)
+}
+
+func startEnvtest(t *testing.T, withWebhooks bool) (client.Client, func()) {
 	t.Helper()
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		// Try the default install location before skipping.
@@ -85,6 +87,9 @@ func StartEnvtest(t *testing.T) (client.Client, func()) {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join(root, "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+	}
+	if withWebhooks {
+		testEnv.WebhookInstallOptions.Paths = []string{filepath.Join(root, "config", "webhook")}
 	}
 	var err error
 	cfg, err = testEnv.Start()

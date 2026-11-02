@@ -16,7 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,7 +48,7 @@ import (
 type LogicalDatabaseReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 	Pools    *pg.PoolCache
 
 	// AuditLogger appends tamper-evident entries to the audit chain on
@@ -62,6 +61,15 @@ type LogicalDatabaseReconciler struct {
 	// SystemNamespace is the namespace where DatabaseProvider admin Secrets
 	// live. Defaults to "keystone-system" — pinned in main.go from a flag.
 	SystemNamespace string
+
+	// OwnershipCheckInterval is the minimum time between ownership-drift
+	// checks of one LogicalDatabase. 0 disables the check.
+	OwnershipCheckInterval time.Duration
+
+	// OwnershipRemediationBudget bounds one remediation pass. 0 = default (10s).
+	OwnershipRemediationBudget time.Duration
+
+	ownership ownershipThrottle
 }
 
 // +kubebuilder:rbac:groups=keystone.hexxlock.io,resources=logicaldatabases,verbs=get;list;watch;create;update;patch;delete
@@ -70,6 +78,7 @@ type LogicalDatabaseReconciler struct {
 // +kubebuilder:rbac:groups=keystone.hexxlock.io,resources=databaseproviders,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is the entry point for the LogicalDatabase controller.
@@ -86,6 +95,7 @@ func (r *LogicalDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	var ldb keystonev1alpha1.LogicalDatabase
 	if err := r.Get(ctx, req.NamespacedName, &ldb); err != nil {
 		if apierrors.IsNotFound(err) {
+			forgetOwnershipMetrics(req.Namespace, req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get LogicalDatabase: %w", err)
@@ -105,7 +115,7 @@ func (r *LogicalDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		// Re-queue immediately; the next reconcile picks up with the
 		// finalizer in place.
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	// Resolve the provider.
@@ -198,15 +208,23 @@ func (r *LogicalDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.fail(ctx, &ldb, "DatabaseEnsureFailed", err)
 	}
 
+	// Acquire the target-database pool: needed for extensions and for the
+	// ownership-drift check. A failure is fatal only when extensions are
+	// requested; the ownership check just reports Unknown.
+	targetCfg := maintCfg
+	targetCfg.Database = ldb.Spec.Name
+	targetPool, releaseTarget, targetErr := r.Pools.Acquire(ctx, targetCfg)
+	if targetErr == nil {
+		defer releaseTarget()
+	} else {
+		targetPool = nil
+		if len(ldb.Spec.Extensions) > 0 {
+			return r.fail(ctx, &ldb, "TargetPoolAcquireFailed", targetErr)
+		}
+	}
+
 	// Ensure extensions inside the target database.
 	if len(ldb.Spec.Extensions) > 0 {
-		targetCfg := maintCfg
-		targetCfg.Database = ldb.Spec.Name
-		targetPool, releaseTarget, err := r.Pools.Acquire(ctx, targetCfg)
-		if err != nil {
-			return r.fail(ctx, &ldb, "TargetPoolAcquireFailed", err)
-		}
-		defer releaseTarget()
 		targetAdmin := pg.NewAdmin(targetPool)
 		for _, ext := range ldb.Spec.Extensions {
 			if err := targetAdmin.EnsureExtension(ctx, ext); err != nil {
@@ -215,11 +233,16 @@ func (r *LogicalDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	// Ownership drift: report-only, never gates Ready, never fails the reconcile.
+	ownership := r.checkOwnership(ctx, &ldb, &provider, targetPool, targetErr)
+
 	// Status: success.
-	return r.success(ctx, &ldb, &provider, logger)
+	return r.success(ctx, &ldb, &provider, logger, ownership)
 }
 
 func (r *LogicalDatabaseReconciler) reconcileDelete(ctx context.Context, ldb *keystonev1alpha1.LogicalDatabase) (ctrl.Result, error) {
+	forgetOwnershipMetrics(ldb.Namespace, ldb.Name)
+	r.ownership.forget(ldb.UID)
 	if !controllerutil.ContainsFinalizer(ldb, keystonev1alpha1.FinalizerLogicalDatabase) {
 		return ctrl.Result{}, nil
 	}
@@ -307,13 +330,13 @@ func (r *LogicalDatabaseReconciler) resolveOwnerRolePassword(
 	pw, ok := sec.Data[key]
 	if !ok {
 		return "", fmt.Errorf(
-			"Secret %s/%s missing key %q (referenced by spec.ownerRolePasswordSecretRef)",
+			"secret %s/%s missing key %q (referenced by spec.ownerRolePasswordSecretRef)",
 			ldb.Namespace, ref.Name, key,
 		)
 	}
 	if len(pw) == 0 {
 		return "", fmt.Errorf(
-			"Secret %s/%s key %q is empty (likely an ExternalSecret that hasn't synced yet, or a misconfigured source)",
+			"secret %s/%s key %q is empty (likely an ExternalSecret that hasn't synced yet, or a misconfigured source)",
 			ldb.Namespace, ref.Name, key,
 		)
 	}
@@ -355,12 +378,12 @@ func (r *LogicalDatabaseReconciler) resolveCredentials(ctx context.Context, p *k
 	}
 	u, ok := sec.Data[userKey]
 	if !ok || len(u) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, userKey)
 	}
 	pw, ok := sec.Data[passKey]
 	if !ok || len(pw) == 0 {
-		return resolvedCreds{}, fmt.Errorf("Secret %s/%s missing key %q",
+		return resolvedCreds{}, fmt.Errorf("secret %s/%s missing key %q",
 			r.SystemNamespace, ref.SecretName, passKey)
 	}
 	return resolvedCreds{Username: string(u), Password: string(pw)}, nil
@@ -371,6 +394,7 @@ func (r *LogicalDatabaseReconciler) success(
 	ldb *keystonev1alpha1.LogicalDatabase,
 	provider *keystonev1alpha1.DatabaseProvider,
 	logger logr.Logger,
+	ownership ownershipOutcome,
 ) (ctrl.Result, error) {
 	patch := client.MergeFrom(ldb.DeepCopy())
 	ldb.Status.ObservedGeneration = ldb.Generation
@@ -383,6 +407,8 @@ func (r *LogicalDatabaseReconciler) success(
 		keystonev1alpha1.ConditionTypeAvailable, metav1.ConditionTrue,
 		"Reconciled", "database accepts connections", ldb.Generation)
 	ldb.Status.Conditions = conditions.ClearProgressing(ldb.Status.Conditions, ldb.Generation)
+	// After the DeepCopy above, or the merge patch silently drops it.
+	applyOwnership(ldb, ownership)
 	if err := r.Status().Patch(ctx, ldb, patch); err != nil {
 		return ctrl.Result{}, fmt.Errorf("patch status: %w", err)
 	}
@@ -467,7 +493,7 @@ func (r *LogicalDatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.SystemNamespace = "keystone-system"
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-logicaldatabase")
+		r.Recorder = eventRecorderFor(mgr, "keystone-logicaldatabase")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&keystonev1alpha1.LogicalDatabase{},

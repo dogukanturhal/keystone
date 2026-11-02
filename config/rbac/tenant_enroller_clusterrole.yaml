@@ -1,6 +1,6 @@
 ---
 # Aggregated, narrow ClusterRole granted to product service accounts
-# (e.g. example-service, example-suite) so they can call the keystone SDK's
+# (e.g. falcon-id, examplesuite) so they can call the keystone SDK's
 # EnrollSchema / DeenrollSchema helpers at runtime.
 #
 # Scope is intentionally restricted to LogicalDatabase + DatabaseSchema.
@@ -14,16 +14,16 @@
 #   apiVersion: rbac.authorization.k8s.io/v1
 #   kind: RoleBinding
 #   metadata:
-#     namespace: example-service
-#     name: example-service-tenant-enroller
+#     namespace: falcon-id
+#     name: falcon-id-tenant-enroller
 #   roleRef:
 #     apiGroup: rbac.authorization.k8s.io
 #     kind: ClusterRole
 #     name: keystone-tenant-enroller
 #   subjects:
 #     - kind: ServiceAccount
-#       namespace: example-service
-#       name: example-service
+#       namespace: falcon-id
+#       name: falcon-id
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -24,7 +24,7 @@ standing project goal, not a nice-to-have.
 
 | GitHub handle | Name | Organisation | Focus area | Email | GPG fingerprint | Since |
 |---|---|---|---|---|---|---|
-| [`dogukanturhal`](https://github.com/dogukanturhal) | Doğukan Turhal | HexxLock | Project Lead — overall direction, CRD API, security review, release engineering | `dogukanturhal@hexxlock.com` | `[TBD — to be published at https://hexxlock.com/.well-known/keys/dogukanturhal.asc before v0.2.0]` | 2026-04 |
+| [`dogukanturhal`](https://github.com/dogukanturhal) | Doğukan Turhal | HexxLock | Project Lead — overall direction, CRD API, security review, release engineering | `dogukanturhal@gmail.com` | `[TBD — to be published at https://example.com/.well-known/keys/dogukanturhal.asc before v0.2.0]` | 2026-04 |
 | `[OPEN — see GOVERNANCE.md §Maintainers to apply]` | — | _second organisation — not HexxLock_ | Any of: engine (`internal/postgres`, `internal/migration`), controller runtime, webhook chain, docs | — | — | — |
 
 The `[OPEN]` slot is **explicitly reserved for a contributor from an
@@ -53,13 +53,13 @@ version:
    documentation that unblocks other contributors. Drive-by typo fixes are
    welcome but do not count towards maintainership.
 2. An existing maintainer nominates you by email to
-   `maintainers@hexxlock.com` with a concrete list of contributions.
+   `dogukanturhal@hexxlock.com` with a concrete list of contributions.
 3. A second existing maintainer seconds the nomination.
-4. A seven-day no-objection window opens on the `maintainers@hexxlock.com`
+4. A seven-day no-objection window opens on the `dogukanturhal@hexxlock.com`
    thread. Any existing maintainer may block with a reasoned objection.
 5. On successful vote, an MR lands adding your row to this file and your
    entry to `CODEOWNERS`, plus your public key to
-   `https://hexxlock.com/.well-known/keys/`.
+   `https://example.com/.well-known/keys/`.
 
 The project deliberately keeps the bar low relative to the commitment —
 maintainership is work, not honour. Stepping back is a normal outcome, not
@@ -67,9 +67,9 @@ a failure (see `GOVERNANCE.md` on the no-drama exit policy).
 
 ## Contact
 
-- Project-wide maintainer mailbox: `maintainers@hexxlock.com`
-- Security reports: `security@hexxlock.com` (see [`SECURITY.md`](SECURITY.md))
-- Code of conduct concerns: `conduct@hexxlock.com` (see
+- Project-wide maintainer mailbox: `dogukanturhal@hexxlock.com`
+- Security reports: `dogukanturhal@hexxlock.com` (see [`SECURITY.md`](SECURITY.md))
+- Code of conduct concerns: `dogukanturhal@hexxlock.com` (see
   [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md))
 
 Individual maintainer emails are listed above for attribution and PGP
@@ -90,7 +90,7 @@ related so no single person becomes a bottleneck.
       "name": "Doğukan Turhal",
       "organisation": "HexxLock",
       "focus": "Project Lead — overall direction, CRD API, security review, release engineering",
-      "email": "dogukanturhal@hexxlock.com",
+      "email": "dogukanturhal@gmail.com",
       "gpg_fingerprint": null,
       "since": "2026-04"
     },

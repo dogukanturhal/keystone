@@ -15,12 +15,12 @@ func TestParseSchemaSelector(t *testing.T) {
 		want    map[string]string
 		wantErr bool
 	}{
-		{"single", "scope=example-service", map[string]string{"scope": "example-service"}, false},
-		{"two", "scope=example-service,tier=tenant", map[string]string{"scope": "example-service", "tier": "tenant"}, false},
-		{"whitespace", " scope = example-service , tier = tenant ", map[string]string{"scope": "example-service", "tier": "tenant"}, false},
-		{"trailing-comma", "scope=example-service,", map[string]string{"scope": "example-service"}, false},
-		{"missing-equals", "scope example-service", nil, true},
-		{"empty-key", "=example-service", nil, true},
+		{"single", "scope=falcon-id", map[string]string{"scope": "falcon-id"}, false},
+		{"two", "scope=falcon-id,tier=tenant", map[string]string{"scope": "falcon-id", "tier": "tenant"}, false},
+		{"whitespace", " scope = falcon-id , tier = tenant ", map[string]string{"scope": "falcon-id", "tier": "tenant"}, false},
+		{"trailing-comma", "scope=falcon-id,", map[string]string{"scope": "falcon-id"}, false},
+		{"missing-equals", "scope falcon-id", nil, true},
+		{"empty-key", "=falcon-id", nil, true},
 		{"empty", "", nil, true},
 		{"only-commas", ",,,", nil, true},
 	}

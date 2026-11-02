@@ -32,17 +32,17 @@ keywords:
 
 # home + sources point at the upstream GitLab repo today. A GitHub mirror
 # is planned (see docs/roadmap.md Phase 16 "open source graduation") —
-# when it lands, add the github.com/hexxlock/keystone URL here alongside.
-home: https://github.com/dogukanturhal/platform/-/tree/master/services/keystone
+# when it lands, add the github.com/dogukanturhal/keystone URL here alongside.
+home: https://github.com/dogukanturhal/keystone
 sources:
-  - https://github.com/dogukanturhal/platform/-/tree/master/services/keystone
-  # NOTE: GitHub mirror (github.com/hexxlock/keystone) pending Phase 16
+  - https://github.com/dogukanturhal/keystone
+  # NOTE: GitHub mirror (github.com/dogukanturhal/keystone) pending Phase 16
   # open-source graduation. Update this list when the mirror is public.
 
 maintainers:
   - name: HexxLock Platform Team
-    email: platform@hexxlock.com
-    url: https://github.com/dogukanturhal/platform
+    email: platform@example.com
+    url: https://github.com/dogukanturhal/keystone
 
 annotations:
   # Artifact Hub category (informational; harmless on other registries).

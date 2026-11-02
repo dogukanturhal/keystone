@@ -104,4 +104,29 @@ spec:
             summary: MigrationExecution p99 apply latency above SLO
             description: |
               p99 apply latency is above the {{ $latency }}s objective over the last 7d. Inspect the MigrationExecution backlog + DatabaseProvider health. Runbook: docs/runbook.md#migration-execution-slow
+    - name: keystone.ownership-drift
+      interval: 1m
+      rules:
+        # Report-only signal: objects in a LogicalDatabase's managed schemas
+        # not owned by spec.ownerRole. Never gates Ready.
+        - alert: KeystoneOwnershipDrift
+          expr: |
+            sum by (namespace, logical_database, owner) (keystone_ownership_drift_objects) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: Objects owned by an unexpected role in {{"{{"}} $labels.logical_database {{"}}"}}
+            description: |
+              {{"{{"}} $value {{"}}"}} object(s) in LogicalDatabase {{"{{"}} $labels.namespace {{"}}"}}/{{"{{"}} $labels.logical_database {{"}}"}} are owned by {{"{{"}} $labels.owner {{"}}"}}, not the database owner role. See the OwnershipDrift condition and docs/runbooks/ownership-drift.md.
+        - alert: KeystoneOwnershipCheckStale
+          expr: |
+            time() - keystone_ownership_drift_last_check_timestamp_seconds > (3 * {{ .Values.metrics.prometheusRule.ownershipCheckIntervalSeconds }})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Ownership-drift check is stale for {{"{{"}} $labels.logical_database {{"}}"}}
+            description: |
+              LogicalDatabase {{"{{"}} $labels.namespace {{"}}"}}/{{"{{"}} $labels.logical_database {{"}}"}} has not completed an ownership check in over 3x the configured interval. Check the manager logs and the OwnershipDrift condition (Unknown means the check is failing).
 {{- end }}

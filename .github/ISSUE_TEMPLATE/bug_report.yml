@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security problems use the private report link in SECURITY.md instead of this form.
+  - type: input
+    id: version
+    attributes:
+      label: Keystone version
+      description: Image tag or `keystonectl version`
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Kubernetes and PostgreSQL versions
+      placeholder: "Kubernetes 1.31, PostgreSQL 17"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Manifests and steps to reproduce
+      description: Remove credentials and hostnames you do not want public.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and resource status
+      description: "Output of `kubectl describe` on the resource and the relevant `keystone-manager` log lines."
+      render: text

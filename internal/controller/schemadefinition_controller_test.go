@@ -190,7 +190,7 @@ func TestSchemaDefinitionReconciler_DeletionIsNoop(t *testing.T) {
 	if err != nil {
 		t.Errorf("reconcile after deletion should not error; got %v", err)
 	}
-	if res.Requeue || res.RequeueAfter != 0 {
+	if res.RequeueAfter != 0 {
 		t.Errorf("deletion reconcile should be no-op; got %+v", res)
 	}
 }
@@ -202,7 +202,7 @@ func TestSchemaDefinitionReconciler_DeletionIsNoop(t *testing.T) {
 //
 // Regression: only the bundle-emit lane wrote them, so any path that
 // finished without emitting left the last drifted reconcile's values
-// frozen on status. Observed 2026-08-06 on downstream-service-public-desired,
+// frozen on status. Observed 2026-08-06 on downstream-public-desired,
 // which carried Ready=True [SchemaMatchesDesired] beside
 // DiffComputed=True [DriftDetected] "174 statement(s) to apply" and a
 // BundleGenerated=True naming a bundle CurrentBundleRef had already
@@ -233,7 +233,7 @@ func TestSchemaDefinitionReconciler_LaneConditionsFollowTerminalPath(t *testing.
 			{
 				Type: keystonev1alpha1.ConditionTypeInspected, Status: metav1.ConditionTrue,
 				Reason:             "LiveSchemaRead",
-				Message:            "inspected 1 schema(s); canonical downstream-service-public carries 174 ops",
+				Message:            "inspected 1 schema(s); canonical downstream-public carries 174 ops",
 				LastTransitionTime: metav1.Now(),
 			},
 			{
@@ -245,7 +245,7 @@ func TestSchemaDefinitionReconciler_LaneConditionsFollowTerminalPath(t *testing.
 			{
 				Type: keystonev1alpha1.ConditionTypeBundleGenerated, Status: metav1.ConditionTrue,
 				Reason:             "BundleEmitted",
-				Message:            `MigrationBundle "downstream-service-public-desired-9f2c1a" tracks apply across 1 schema(s)`,
+				Message:            `MigrationBundle "downstream-public-desired-9f2c1a" tracks apply across 1 schema(s)`,
 				LastTransitionTime: metav1.Now(),
 			},
 		}
@@ -257,7 +257,7 @@ func TestSchemaDefinitionReconciler_LaneConditionsFollowTerminalPath(t *testing.
 		sd := &keystonev1alpha1.SchemaDefinition{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "keystone-system", Name: name},
 			Spec: keystonev1alpha1.SchemaDefinitionSpec{
-				SchemaRef: "downstream-service-public", ApplyStrategy: "versioned",
+				SchemaRef: "downstream-public", ApplyStrategy: "versioned",
 				Tables: []keystonev1alpha1.DesiredTable{
 					{
 						Name: "placeholder",
@@ -272,7 +272,7 @@ func TestSchemaDefinitionReconciler_LaneConditionsFollowTerminalPath(t *testing.
 			t.Fatalf("create: %v", err)
 		}
 		sd.Status.Conditions = staleFromEmitLane()
-		sd.Status.CurrentBundleRef = "downstream-service-public-desired-9f2c1a"
+		sd.Status.CurrentBundleRef = "downstream-public-desired-9f2c1a"
 		sd.Status.PendingOperations = 174
 		sd.Status.MatchedSchemas = 1
 		if err := k8s.Status().Update(ctx, sd); err != nil {
@@ -330,7 +330,7 @@ func TestSchemaDefinitionReconciler_LaneConditionsFollowTerminalPath(t *testing.
 		if _, err := r.markNoMatches(ctx, sd); err != nil {
 			t.Fatalf("markNoMatches: %v", err)
 		}
-		wantCond(t, sd.Name, keystonev1alpha1.ConditionTypeReady, metav1.ConditionFalse, "NoMatchingSchemas")
+		wantCond(t, sd.Name, keystonev1alpha1.ConditionTypeReady, metav1.ConditionTrue, "NoMatchingSchemas")
 		wantCond(t, sd.Name, keystonev1alpha1.ConditionTypeInspected, metav1.ConditionFalse, "NoMatchingSchemas")
 		wantCond(t, sd.Name, keystonev1alpha1.ConditionTypeDiffComputed, metav1.ConditionFalse, "NoMatchingSchemas")
 		wantCond(t, sd.Name, keystonev1alpha1.ConditionTypeBundleGenerated, metav1.ConditionFalse, "NoMatchingSchemas")

@@ -1,0 +1,7 @@
+.git
+bin
+vendor
+cover.out
+cover.html
+*.test
+.env*

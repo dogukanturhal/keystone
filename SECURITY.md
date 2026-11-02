@@ -1,122 +1,65 @@
 # Security policy
 
-Keystone is infrastructure software that holds database credentials and
-executes schema changes against production PostgreSQL clusters. We take
-vulnerability reports seriously and want them in a private channel before
-anyone else sees them.
+Keystone holds database credentials and runs schema changes against
+PostgreSQL servers. Please report vulnerabilities privately.
 
 ## Reporting a vulnerability
 
-Email **security@hexxlock.com** with:
+Use GitHub private vulnerability reporting: open the repository's **Security**
+tab and choose **Report a vulnerability**
+(<https://github.com/dogukanturhal/keystone/security/advisories/new>).
 
-- A description of the issue.
-- The Keystone version(s) affected (`keystonectl version` or the image tag).
-- A reproduction — CRD manifest, cluster shape, what you observed, what you
-  expected.
-- Your assessment of impact (who can trigger it, what they gain).
-- Whether you are willing to be credited publicly in the advisory.
+If you cannot use GitHub, email **dogukanturhal@hexxlock.com**. Do not post
+details in a public issue, discussion or chat.
 
-Please encrypt anything sensitive. Our PGP key is published at
-`https://hexxlock.com/.well-known/security.asc`
-(fingerprint also linked from the HexxLock website under `/security`). If you
-cannot encrypt, email us first to arrange a secure channel — do **not** post
-exploit details to a public issue tracker, mailing list, social media, or
-chat while waiting.
+Please include:
 
-We acknowledge reports within **two business days**. If you have not heard
-from us in that window, resend — mail filters are the usual culprit.
+- What the issue is and which Keystone version or image tag is affected.
+- A way to reproduce it: the manifests, the cluster shape, what you saw and
+  what you expected.
+- Who can trigger it and what they gain.
+- Whether you want to be credited.
 
-## Disclosure timeline
+We acknowledge reports within two business days.
 
-We operate on a **90-day responsible disclosure** window from the moment we
-acknowledge the report:
+## Disclosure
+
+We follow a 90-day coordinated disclosure window from acknowledgement.
 
 | Day | What happens |
 |---|---|
-| 0   | Report acknowledged; maintainer triage starts. |
-| 0–7 | Severity assessed (CVSS v3.1); CVE requested if applicable. |
-| 7–60| Fix developed, reviewed, tested under embargo. |
-| 60–75 | Patch prepared; downstream operators notified under embargo at T-14. |
-| ~90 | Coordinated public release: patched version, advisory, CVE. |
+| 0 | Report acknowledged, triage starts. |
+| 0-7 | Severity assessed (CVSS v3.1); a CVE is requested if it applies. |
+| 7-60 | Fix developed and reviewed privately. |
+| ~90 | Patched release and advisory published together. |
 
-If a fix is straightforward we release sooner. If the fix needs an
-API change or carries migration risk we may negotiate an extension with the
-reporter, but never unilaterally. If exploitation in the wild is observed,
-we release immediately and skip the remaining embargo.
-
-Reporters are credited in the advisory by name or handle unless they ask not
-to be. No bug bounty is offered at this stage.
-
-## Scope
-
-**In scope** — we treat these as vulnerabilities:
-
-- The operator binary (`keystone-manager`) and any container image we publish.
-- The CRD Go types (`api/`), and the client SDKs in the keystone-sdk repository.
-- Admission webhooks and validation logic.
-- Generated RBAC manifests (anything under `config/rbac/`).
-- The CLI (`keystonectl`) and its embedded credentials handling.
-- The Helm chart and Kustomize bases we ship.
-- Supply-chain artefacts we publish: the SBOM, the cosign signature, the
-  Harbor image manifest.
-
-**Out of scope** — please do not report these as security issues, but
-regular bugs are welcome:
-
-- Misconfiguration of the user's own cluster (missing NetworkPolicies,
-  permissive RBAC granted by the user, exposed kubeconfigs).
-- PostgreSQL misconfiguration (weak passwords on upstream DB, unencrypted
-  traffic, superuser credentials handed to non-admin tenants) — **unless**
-  Keystone itself can be coerced into creating the misconfiguration.
-- Denial of service against a single reconcile loop via deliberately
-  oversized CRs; submit as a performance issue.
-- Vulnerabilities in dependencies that do not affect Keystone's attack
-  surface (report upstream; we will track and bump).
-- Social engineering, physical access, and anything requiring a
-  pre-compromised cluster-admin.
-
-If you are not sure, report it anyway and let us sort scope.
+A simple fix ships sooner. If a fix needs an API change we may agree a longer
+window with you, never without telling you. If the issue is being exploited we
+release immediately. Reporters are credited unless they ask not to be. There
+is no bug bounty.
 
 ## Supported versions
 
-Keystone is pre-1.0. Only the **latest minor release** receives security
-fixes. Once 1.0 ships we will extend to the latest two minors; the current
-policy reflects the reality that pre-1.0 users are expected to track
-releases.
+Keystone is pre-1.0. Only the latest minor release receives security fixes.
 
-| Version | Supported? |
-|---|---|
-| 0.1.x (latest minor) | Yes — fixes published as 0.1.N+1 |
-| 0.0.x and earlier    | No  — upgrade to 0.1.x |
+## Scope
 
-Support status is re-evaluated at each minor release and noted in the
-release announcement.
+In scope: the operator (`keystone-manager`) and the images we publish, the
+admission webhooks and validation logic, generated RBAC under `config/rbac/`,
+the CLIs (`keystonectl`, `keystoneadm`), the Helm chart and Kustomize bases,
+the `api/` Go types, and release artifacts (checksums, SBOM, signatures).
 
-## Supply-chain assurances
+Out of scope: vulnerabilities in PostgreSQL, Kubernetes or other
+dependencies (report those upstream; tell us if Keystone's use of them makes
+it worse), denial of service by someone who already has cluster-admin, and
+findings that need a malicious `DatabaseProvider` admin credential holder to
+do what that credential already allows.
 
-Every tagged release publishes:
+## Verifying releases
 
-- **SBOM** — SPDX JSON at `bin/keystone-sbom.spdx.json`, generated with
-  `syft` (see `make sbom`). Attached to the GitHub / GitLab release and to
-  the container image as an OCI referrer.
-- **Vulnerability scan** — `trivy fs` + `trivy image` with
-  `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`. The release
-  pipeline fails if either reports a fixable HIGH or CRITICAL.
-- **Cosign signature** — keyless, OIDC-signed via the GitLab CI identity.
-  Verify with:
+Release assets carry a checksum file signed with cosign keyless signing, and
+an SBOM. Container images are signed and have a build provenance attestation.
+See [docs/verify-releases.md](docs/verify-releases.md) for the commands.
 
-  ```
-  cosign verify ghcr.io/dogukanturhal/keystone-manager:<tag> \
-    --certificate-identity-regexp 'https://github.com/dogukanturhal/.*' \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com
-  ```
-
-- **Pinned tool versions** — `controller-gen`, `kustomize`, `envtest`,
-  `golangci-lint`, `syft`, `trivy`, `cosign` are all version-pinned in the
-  `Makefile` and installed under `./bin/`. CI rejects drift.
-- **DCO** — every commit is signed off (see `CONTRIBUTING.md`). Unsigned
-  commits cannot land on `master`.
-
-These are verification inputs for anyone shipping Keystone into regulated
-environments (FedRAMP, SOC 2, PCI) and for the in-toto / SLSA L3 attestation
-roadmap.
+Dependencies are watched by Dependabot and CodeQL, and `govulncheck` runs on
+every pull request.

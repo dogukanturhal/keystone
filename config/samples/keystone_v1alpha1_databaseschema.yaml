@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Sample DatabaseSchema — one module's schema inside a shared database.
-# The SchemaController creates the schema and grants ownership; the
-# MigrationController then runs the SQL for it.
+# Sample DatabaseSchema — the CRM module's schema inside example_suite.
+# Mirrors db-migrator's hardcoded {SharedDB:example_suite, Schema:crm} pair
+# (cmd/main.go:238). Phase 2's SchemaController will create the schema and
+# grant ownership; Phase 3's MigrationController will run the SQL.
 apiVersion: keystone.hexxlock.io/v1alpha1
 kind: DatabaseSchema
 metadata:
@@ -10,7 +11,7 @@ metadata:
   namespace: keystone-system
 spec:
   name: crm
-  logicalDatabaseRef: example-suite-core
+  logicalDatabaseRef: examplesuite
   ownerRole: crm_owner
   defaultPrivileges:
     - role: crm_app

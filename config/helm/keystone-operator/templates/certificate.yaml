@@ -5,7 +5,8 @@
 # cert-manager.io/inject-ca-from so rotations are seamless.
 #
 # PKCS#8 private key encoding is the HexxLock platform default — required
-# for Linkerd compatibility on any meshed namespace
+# for Linkerd compatibility on any meshed namespace (internal engineering notes
+# pkcs8_encoding.md). Keep it on even outside mesh; harmless.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

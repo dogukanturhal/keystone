@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,7 +42,7 @@ import (
 type MigrationPlanReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 }
 
 // +kubebuilder:rbac:groups=keystone.hexxlock.io,resources=migrationplans,verbs=get;list;watch;create;update;patch;delete
@@ -212,7 +211,7 @@ func (r *MigrationPlanReconciler) patchStatus(
 // without waiting for the periodic requeue.
 func (r *MigrationPlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("keystone-migrationplan")
+		r.Recorder = eventRecorderFor(mgr, "keystone-migrationplan")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&keystonev1alpha1.MigrationPlan{},

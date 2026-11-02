@@ -300,7 +300,9 @@ func TestCRTTL_ExecutionPhasesGCedCorrectly(t *testing.T) {
 	ancientFail := mkExec("e-ancient-fail", "default", "mb-1", "schema-C", keystonev1alpha1.ExecutionPhaseFailed, 96*time.Hour)
 	// One running (always kept).
 	running := mkExec("e-running", "default", "mb-1", "schema-D", keystonev1alpha1.ExecutionPhaseRunning, 30*24*time.Hour)
-	c := newCRTTLFakeClient(sd, mb, latestSucc, oldSucc, oldFail, ancientFail, running)
+	// Ancient Failed whose bundle no longer exists (GC'd).
+	orphanFail := mkExec("e-orphan-fail", "default", "mb-gone", "schema-E", keystonev1alpha1.ExecutionPhaseFailed, 96*time.Hour)
+	c := newCRTTLFakeClient(sd, mb, latestSucc, oldSucc, oldFail, ancientFail, running, orphanFail)
 
 	ctrl := &CRTTLController{
 		Client:               c,
@@ -317,7 +319,11 @@ func TestCRTTL_ExecutionPhasesGCedCorrectly(t *testing.T) {
 		{"e-latest", true},      // latest Succeeded — kept
 		{"e-old-succ", false},   // old Succeeded sibling — GC'd
 		{"e-old-fail", true},    // within failure window
-		{"e-ancient-fail", false}, // past failure window
+		// Past the failure window, but its bundle still exists: a failed
+		// execution is the bundle's only failure record, so it is kept until
+		// the bundle itself is reaped.
+		{"e-ancient-fail", true},
+		{"e-orphan-fail", false}, // bundle gone — plain failure-window GC
 		{"e-running", true},     // non-terminal — kept
 	}
 	for _, tc := range cases {

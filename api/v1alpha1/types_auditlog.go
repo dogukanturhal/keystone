@@ -3,8 +3,6 @@
 package v1alpha1
 
 import (
-	"time"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -12,39 +10,6 @@ import (
 // Enforced by the admission webhook — any attempt to create a second
 // AuditLog under a different name is rejected.
 const AuditLogName = "keystone"
-
-// DefaultAuditRetentionDays mirrors the kubebuilder default on
-// AuditLogSpec.RetentionDays (~7 years — the SOC 2 / PCI / HIPAA
-// retention floor). It applies when the field is unset or non-positive.
-const DefaultAuditRetentionDays int32 = 2555
-
-// EffectiveRetentionDays resolves the retention window actually in
-// force, substituting the default for an unset or non-positive value.
-func EffectiveRetentionDays(retentionDays int32) int32 {
-	if retentionDays <= 0 {
-		return DefaultAuditRetentionDays
-	}
-	return retentionDays
-}
-
-// RetentionCutoff returns the instant before which an AuditEntry is
-// considered expired and therefore eligible for deletion.
-//
-// Two components depend on agreeing about this exactly: the retention
-// controller, which selects entries to archive and delete, and the
-// admission webhook, which refuses to delete anything that is not yet
-// expired. If they disagree by even a second the controller's own
-// deletes are rejected and entries accumulate in etcd, so both call
-// this function rather than computing a cutoff of their own.
-func RetentionCutoff(retentionDays int32, now time.Time) time.Time {
-	return now.Add(-time.Duration(EffectiveRetentionDays(retentionDays)) * 24 * time.Hour)
-}
-
-// IsRetentionExpired reports whether this entry is past the retention
-// window and may therefore be deleted.
-func (e *AuditEntry) IsRetentionExpired(retentionDays int32, now time.Time) bool {
-	return e.Spec.Timestamp.Time.Before(RetentionCutoff(retentionDays, now))
-}
 
 // AuditLogSpec is static configuration for the audit chain.
 type AuditLogSpec struct {

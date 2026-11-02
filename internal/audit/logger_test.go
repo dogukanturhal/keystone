@@ -109,6 +109,11 @@ func TestLogger_AppendChainsEntries(t *testing.T) {
 	if _, err := VerifyChain(list.Items); err != nil {
 		t.Errorf("VerifyChain returned error on freshly-built chain: %v", err)
 	}
+	for _, entry := range list.Items {
+		if entry.Spec.SelfHash != hashes[entry.Spec.Sequence-1] {
+			t.Errorf("persisted hash for sequence %d differs from Append result", entry.Spec.Sequence)
+		}
+	}
 
 	// Explicitly: entry 2's PrevHash must equal entry 1's SelfHash.
 	// (buildChain in the test may shuffle order; VerifyChain sorts.)

@@ -70,6 +70,7 @@ var (
 			sharedErr = err
 			return nil
 		}
+		sharedContainerID = c.GetContainerID()
 		host, err := c.Host(ctx)
 		if err != nil {
 			sharedErr = err
@@ -88,7 +89,8 @@ var (
 		}
 		return pool
 	})
-	sharedErr error
+	sharedErr         error
+	sharedContainerID string
 )
 
 // testDSNEnv names an already-running PostgreSQL to test against instead
@@ -102,6 +104,9 @@ var poolRequested bool
 func getPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	p := sharedPool()
+	if sharedContainerID != "" {
+		t.Logf("throwaway PostgreSQL 16 container: %s", sharedContainerID)
+	}
 	if sharedErr != nil || p == nil {
 		// Naming a database and not getting it is a failure, not a reason
 		// to skip: otherwise CI sets the variable, the database is

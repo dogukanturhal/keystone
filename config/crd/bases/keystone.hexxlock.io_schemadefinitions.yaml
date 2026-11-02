@@ -71,7 +71,7 @@ spec:
               must be set. Mixing both is rejected by admission. SchemaRef stays
               the default for single-tenant definitions; SchemaSelector enables
               one SchemaDefinition to drive every DatabaseSchema in a tenant pool
-              (the realm-DB pattern in example-service, business-module DBs in example-suite,
+              (the realm-DB pattern in falcon-id, business-module DBs in examplesuite,
               etc.) without per-tenant CR boilerplate.
             properties:
               allowDestructive:
@@ -160,11 +160,11 @@ spec:
                       IN SCHEMA <Schema OR sd.targetSchema>
                       GRANT <Privileges> ON <ObjectType> TO <ToRole>;
 
-                  Why this exists (gap surfaced 2026-05-12 on example-service migration
+                  Why this exists (gap surfaced 2026-05-12 on falcon-id migration
                   234): the operator-emitted bundles run CREATE TABLE as the
                   keystone_admin role. Pre-Keystone default-privileges were set
                   for the `postgres` role, so any keystone_admin-created table
-                  silently dropped out of the example_service_app grant chain. The
+                  silently dropped out of the falcon_id_app grant chain. The
                   BackchannelLogoutDrainer spammed SQLSTATE 42501 every 5s until
                   a hand-authored migration bundle re-pointed ALTER DEFAULT
                   PRIVILEGES at keystone_admin. With DefaultPrivileges declared
@@ -180,12 +180,12 @@ spec:
                     <Privileges> ON <ObjectType> TO <ToRole>;\n\nIdempotent in PostgreSQL
                     — re-issuing the same grant against the\nsame role/schema/object-type
                     is a no-op (pg_default_acl uniqueness).\n\nPractical example for
-                    the example-service 2026-05-12 fix:\n\n\tdefaultPrivileges:\n\t
-                    \ - forRole: keystone_admin\n\t    toRole:  example_service_app\n\t
-                    \   objectType: tables\n\t    privileges: [SELECT, INSERT, UPDATE,
-                    DELETE, TRUNCATE, REFERENCES, TRIGGER]\n\t  - forRole: keystone_admin\n\t
-                    \   toRole:  example_service_app\n\t    objectType: sequences\n\t
-                    \   privileges: [USAGE, SELECT, UPDATE]"
+                    the falcon-id 2026-05-12 fix:\n\n\tdefaultPrivileges:\n\t  - forRole:
+                    keystone_admin\n\t    toRole:  falcon_id_app\n\t    objectType:
+                    tables\n\t    privileges: [SELECT, INSERT, UPDATE, DELETE, TRUNCATE,
+                    REFERENCES, TRIGGER]\n\t  - forRole: keystone_admin\n\t    toRole:
+                    \ falcon_id_app\n\t    objectType: sequences\n\t    privileges:
+                    [USAGE, SELECT, UPDATE]"
                   properties:
                     forRole:
                       description: |-
@@ -645,13 +645,26 @@ spec:
                   PolicyRef is the SchemaPolicy the reconciler stamps onto the
                   auto-generated MigrationBundle. When empty, the default
                   "production-safety" policy is applied — this matches the value
-                  used by every hand-authored bundle in the GitOps repository
+                  used by every hand-authored bundle in the the GitOps repository repo
                   and ensures the downstream MigrationBundle controller has a
                   policy to look up (without a policyRef, the bundle pipeline
                   stalls before creating a MigrationPlan).
                 maxLength: 253
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
+              retainTables:
+                description: |-
+                  RetainTables names tables the differ must never DROP, even with
+                  allowDestructive=true. A table that exists in the database but is
+                  absent from spec.tables is then left alone (the differ records a
+                  warning) instead of being planned for removal. Use for tables owned
+                  outside this SchemaDefinition: hand-written migrations, other
+                  services, or legacy tables awaiting an explicit decision.
+                items:
+                  type: string
+                maxItems: 1024
+                type: array
+                x-kubernetes-list-type: set
               schemaRef:
                 description: |-
                   SchemaRef is the DatabaseSchema CR this definition applies to
@@ -1525,7 +1538,7 @@ spec:
                   it onto DatabaseSchema.Status.LastAppliedFingerprint when a
                   MigrationExecution succeeds for that schema.
 
-                  SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) compare
+                  SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare
                   this against per-schema LastAppliedFingerprint to verify
                   convergence in an identity-based, race-free way.
 

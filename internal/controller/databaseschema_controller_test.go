@@ -55,7 +55,7 @@ func TestDatabaseSchemaReconciler_AddsFinalizer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if !res.Requeue {
+	if res.RequeueAfter <= 0 {
 		t.Errorf("expected Requeue after finalizer add")
 	}
 	var after keystonev1alpha1.DatabaseSchema

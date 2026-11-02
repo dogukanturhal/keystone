@@ -21,7 +21,7 @@ type LogicalDatabaseSpec struct {
 	// Name is the actual PostgreSQL database name. Distinct from
 	// metadata.name: PG identifiers commonly use underscores (e.g.
 	// example_suite) while Kubernetes resources prefer hyphens
-	// (example-suite). Required so this never has to be inferred.
+	// (examplesuite). Required so this never has to be inferred.
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=63
@@ -116,7 +116,7 @@ type LogicalDatabaseSpec struct {
 	// databases.
 	//
 	// Override when adopting Keystone on a database that already has a
-	// migrator managing its own `schema_migrations`. Example Service is the
+	// migrator managing its own `schema_migrations`. Falcon-ID is the
 	// canonical example: its existing table has `version INTEGER PK`
 	// while Keystone's runner uses `version TEXT PK`. Setting
 	// trackingTableName to "keystone_schema_migrations" lets both
@@ -170,6 +170,28 @@ type LogicalDatabaseSpec struct {
 	//
 	// +optional
 	OwnerRolePasswordSecretRef *corev1.SecretKeySelector `json:"ownerRolePasswordSecretRef,omitempty"`
+
+	// OwnershipRemediation overrides the DatabaseProvider's
+	// spec.ownershipRemediation for this database. Empty (the default)
+	// inherits the provider's setting; the provider defaults to Report.
+	//
+	//   Report                      — only report OwnershipDrift (condition,
+	//                                 status summary, metrics).
+	//   ReassignFromConnectionRole  — additionally ALTER ... OWNER TO
+	//                                 spec.ownerRole for drifted objects
+	//                                 currently owned by the provider's
+	//                                 connection role. Objects owned by any
+	//                                 other role, RLS-unforced tables, views
+	//                                 and partition/inheritance children that
+	//                                 depend on RLS tables,
+	//                                 SECURITY DEFINER routines, owned
+	//                                 sequences and schemas stay report-only.
+	//
+	// Deliberately has no default so "unset" can mean "inherit".
+	//
+	// +optional
+	// +kubebuilder:validation:Enum=Report;ReassignFromConnectionRole
+	OwnershipRemediation string `json:"ownershipRemediation,omitempty"`
 }
 
 // LogicalDatabaseStatus reports observed state.
@@ -226,6 +248,74 @@ type LogicalDatabaseStatus struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=64
 	ObservedPasswordHash string `json:"observedPasswordHash,omitempty"`
+
+	// OwnershipDrift summarises the last ownership check: objects inside
+	// the managed schemas whose owner is not the expected role. Report-only
+	// by default; it never gates Ready. See the OwnershipDrift condition.
+	//
+	// +optional
+	OwnershipDrift *OwnershipDriftStatus `json:"ownershipDrift,omitempty"`
+}
+
+// OwnershipDriftStatus is the bounded summary of the last ownership check.
+type OwnershipDriftStatus struct {
+	// LastCheckTime is when the check last completed.
+	//
+	// +optional
+	LastCheckTime *metav1.Time `json:"lastCheckTime,omitempty"`
+
+	// ExpectedOwner is spec.ownerRole at the time of the check.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	ExpectedOwner string `json:"expectedOwner,omitempty"`
+
+	// DriftedObjects is the total number of objects with an unexpected owner.
+	//
+	// +optional
+	DriftedObjects int32 `json:"driftedObjects,omitempty"`
+
+	// Remediable is how many of those the operator could reassign when
+	// remediation is enabled (owned by the connection role, not blocked).
+	//
+	// +optional
+	Remediable int32 `json:"remediable,omitempty"`
+
+	// Groups breaks the drift down by (kind, current owner).
+	//
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
+	Groups []OwnershipDriftGroup `json:"groups,omitempty"`
+}
+
+// OwnershipDriftGroup is one (kind, owner) bucket of drifted objects.
+type OwnershipDriftGroup struct {
+	// Kind is the object kind (table, function, enum, ...).
+	//
+	// +kubebuilder:validation:MaxLength=256
+	Kind string `json:"kind"`
+
+	// Owner is the current owning role.
+	//
+	// +kubebuilder:validation:MaxLength=256
+	Owner string `json:"owner"`
+
+	// Count is the number of objects in this bucket.
+	Count int32 `json:"count"`
+
+	// Remediable is how many of them the operator may reassign.
+	//
+	// +optional
+	Remediable int32 `json:"remediable,omitempty"`
+
+	// Sample lists a few schema-qualified identifiers from the bucket.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxItems=5
+	// +kubebuilder:validation:items:MaxLength=256
+	// +listType=atomic
+	Sample []string `json:"sample,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -236,6 +326,7 @@ type LogicalDatabaseStatus struct {
 // +kubebuilder:printcolumn:name="Owner",type="string",JSONPath=".spec.ownerRole"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
 // +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.sizeBytes"
+// +kubebuilder:printcolumn:name="OwnershipDrift",type="string",priority=1,JSONPath=".status.conditions[?(@.type==\"OwnershipDrift\")].status"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // LogicalDatabase declares a PostgreSQL database that should exist on a

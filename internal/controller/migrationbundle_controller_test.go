@@ -4,6 +4,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -19,8 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone-sdk/go/migration"
+	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 )
 
 // TestMigrationBundleReconciler_SourceResolutionFailure — when the
@@ -394,6 +395,14 @@ func TestMigrationBundleReconciler_FinalizerAddedAndCleared(t *testing.T) {
 	if !controllerutil.ContainsFinalizer(&after, keystonev1alpha1.FinalizerMigrationBundle) {
 		t.Fatalf("finalizer not added")
 	}
+	// A wedged hash must not affect deletion/finalizer cleanup, even
+	// though resolving this bundle's source would also fail.
+	after.Status.ContentHash = "old-content-hash"
+	after.Status.ContentHashVersion = "old-version"
+	if err := k8s.Status().Update(ctx, &after); err != nil {
+		t.Fatalf("seed wedged hash: %v", err)
+	}
+	_, _ = r.fail(ctx, &after, "ContentHashChanged", fmt.Errorf("wedged bundle"))
 	// Delete — finalizer holds it.
 	if err := k8s.Delete(ctx, &after); err != nil {
 		t.Fatalf("delete: %v", err)

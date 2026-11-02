@@ -11,7 +11,7 @@ spec:
     - name: canary
       # Pick schemas whose owning cluster has tier=canary. The legacy
       # hub also operates in canary tier (see ClusterRegistration sample),
-      # so this stage hits the example/canary tenant first.
+      # so this stage hits the exampletenant test tenant first.
       clusterTierSelector: [canary]
       parallelism: 1
       soakDuration: 5m
@@ -50,7 +50,7 @@ metadata:
   labels:
     keystone.hexxlock.io/role: free-tier-shadow
 spec:
-  displayName: "Production EU-West-1 (free-tier shadow)"
+  displayName: "Production eu-west-1 (free-tier shadow)"
   tier: free
   region: eu-west-1
   dataResidency: eu

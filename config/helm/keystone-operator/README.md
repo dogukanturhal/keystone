@@ -16,7 +16,7 @@ expand/contract — via declarative CRDs.
 
 ```bash
 helm install keystone \
-  oci://ghcr.io/dogukanturhal/charts/keystone-operator \
+  oci://registry.example.com/charts/keystone-operator \
   --version 0.1.0 \
   --namespace keystone-system --create-namespace
 ```
@@ -24,7 +24,7 @@ helm install keystone \
 > The canonical distribution is kustomize (`config/default`). This chart
 > is a consumer-facing packaging; it must track the kustomize bundle's
 > behaviour. Divergences are bugs — file them in
-> [github.com/dogukanturhal/platform](https://github.com/dogukanturhal/platform/-/issues).
+> [github.com/dogukanturhal/keystone](https://github.com/dogukanturhal/keystone/issues).
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ helm install keystone \
 
 ```bash
 helm install keystone \
-  oci://ghcr.io/dogukanturhal/charts/keystone-operator \
+  oci://registry.example.com/charts/keystone-operator \
   --version 0.1.0 \
   --namespace keystone-system --create-namespace
 ```

@@ -130,8 +130,8 @@ reviewable.
       CreateOrUpdate of child LogicalDatabase + DatabaseSchema with
       ownerReferences for Argo prune; finalizer-controlled deletion
       that waits for children to clean up first.
-- [x] Sample ProductDefinition (example product with core + financials
-      databases) and ProductInstance (example tenant).
+- [x] Sample ProductDefinition (ExampleSuite with core + financials silo)
+      and ProductInstance (exampletenant test tenant).
 - [ ] APISIX route registration (Phase 4.1 — needs the apisix Go client
       from the legacy db-provisioner).
 - [ ] SpiceDB tuple writes (Phase 4.1 — same — needs the existing
@@ -293,13 +293,13 @@ Operational hardening + v0.1.0 release.
       Application (sync wave 2).
 - [x] Manager fallback version bumped to v0.1.0.
 - [ ] `git tag keystone-v0.1.0` — done after merge.
-- [ ] Public OSS publication to `github.com/hexxlock/keystone`
+- [ ] Public OSS publication to `github.com/dogukanturhal/keystone`
       (Phase 8.1 — manual step; needs DCO bot setup, CI mirror, and
       go module path migration).
 - [ ] Phase 8.1 — OpenTelemetry tracing + multi-window burn-rate
       alerts.
 - [ ] Phase 8.1 — delete legacy `services/db-migrator` and
-      `services/db-provisioner` (deferred — Example Service may still
+      `services/db-provisioner` (deferred — Falcon-ID may still
       reference them per session memory; needs explicit cutover
       verification).
 

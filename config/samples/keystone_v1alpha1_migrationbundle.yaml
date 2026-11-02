@@ -5,7 +5,7 @@
 # the SQL files alongside the bundle.
 #
 # Production usage:
-#   1. Author SQL in <gitops-repo>/keystone/migrations/catalog/v42/
+#   1. Author SQL in <gitops-repo>/keystone/migrations/crm/v42/
 #   2. CI pipeline packs them into a ConfigMap (kustomize configMapGenerator)
 #   3. ArgoCD syncs both the ConfigMap and this MigrationBundle
 #   4. MigrationBundleReconciler creates one MigrationExecution per matched schema

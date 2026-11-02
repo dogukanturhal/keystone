@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/dogukanturhal/platform/-/raw/master/services/keystone/config/helm/keystone-operator/values.schema.json",
+  "$id": "https://github.com/dogukanturhal/keystone/raw/main/config/helm/keystone-operator/values.schema.json",
   "title": "keystone-operator values",
   "description": "JSON Schema for the keystone-operator Helm chart values. Type-checks the load-bearing fields so `helm lint` catches common misconfiguration before install.",
   "type": "object",
@@ -103,7 +103,8 @@
             "namespace": { "type": "string" },
             "labels": { "type": "object" },
             "reconcileSuccessObjective": { "type": "number", "minimum": 0, "maximum": 1 },
-            "migrationApplyP99Seconds": { "type": "number", "minimum": 0 }
+            "migrationApplyP99Seconds": { "type": "number", "minimum": 0 },
+            "ownershipCheckIntervalSeconds": { "type": "number", "minimum": 1 }
           }
         },
         "pprof": {

@@ -1,0 +1,87 @@
+# Throwaway PostgreSQL for the quickstart. NOT for production: data lives in
+# an emptyDir and the admin password is in this file.
+#
+# DatabaseProvider.spec.sslMode does not accept "disable", so the server needs
+# TLS. An init container generates a self-signed certificate; the sample uses
+# sslMode "require", which encrypts without verifying the certificate.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: quickstart-pg-admin
+  namespace: keystone-system
+type: Opaque
+stringData:
+  username: postgres
+  password: quickstart-only-change-me
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: keystone-system
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: keystone-quickstart
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      initContainers:
+        - name: tls
+          image: postgres:17
+          command:
+            - sh
+            - -c
+            - >-
+              openssl req -new -x509 -days 30 -nodes -subj /CN=postgres
+              -out /tls/server.crt -keyout /tls/server.key &&
+              chown 999:999 /tls/server.crt /tls/server.key &&
+              chmod 600 /tls/server.key
+          volumeMounts:
+            - { name: tls, mountPath: /tls }
+      containers:
+        - name: postgres
+          image: postgres:17
+          args:
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/tls/server.crt
+            - -c
+            - ssl_key_file=/tls/server.key
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: quickstart-pg-admin, key: password }
+          ports:
+            - { name: pg, containerPort: 5432 }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql }
+            - { name: tls, mountPath: /tls, readOnly: true }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tls
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: keystone-system
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - { name: pg, port: 5432, targetPort: pg }

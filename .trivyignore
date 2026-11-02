@@ -150,7 +150,7 @@ CVE-2026-33186
 #   https://github.com/sigstore/cosign/releases
 #   https://github.com/kubernetes/kubernetes/releases
 #
-# These also gate sign-image via vuln-scan-tools-image (the CI configuration
+# These also gate sign-image via vuln-scan-tools-image (.gitlab-ci.yml
 # sign-image.needs). Without them, every master pipeline produces an
 # unsigned image that Kyverno verify-keystone-image-signatures denies.
 CVE-2026-33811

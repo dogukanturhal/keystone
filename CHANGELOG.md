@@ -7,8 +7,41 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 
 ## [Unreleased]
 
+### Changed
+
+- First public sync from the development repository. Documentation and
+  manifests were cleaned for public use: placeholder image registry and
+  dashboard hosts replaced, internal planning documents withheld, and the
+  `api/` module headers set to Apache-2.0 to match `api/LICENSE`.
+- Added a kind quickstart (`docs/getting-started.md`, `hack/quickstart/`),
+  GitHub Actions for CI and releases, issue templates and Dependabot.
+
+### Fixed
+
+- Manager builds and CI use Go 1.26.9, and both Go modules pin `x/net`
+  v0.60.0, clearing HIGH CVE-2026-78667, CVE-2026-78669 and CVE-2026-97031
+  without vulnerability-scan exceptions.
+
+- MigrationBundle content hashes are now pinned to `status.contentHashVersion`,
+  allowing an existing bundle to ship new SQL with a new `spec.version` while
+  still refusing same-version content drift. Legacy status is upgraded from
+  execution/plan evidence without manual status patches. Staged rollouts restart
+  their progress for each new version.
+- Admission no longer revalidates external SQL for unchanged-spec updates:
+  finalizer removal, labels, annotations and GitOps dry-run comparisons remain
+  possible even when a bundle is `ContentHashChanged`. Spec edits still run
+  integrity, lint, approval and immutability checks.
+
 ### Added
 
+- `LogicalDatabase` reports object-ownership drift: an `OwnershipDrift`
+  condition (never gates `Ready`), a bounded `status.ownershipDrift` summary,
+  `keystone_ownership_drift_*` metrics and chart alerts. Report-only by
+  default. `spec.ownershipRemediation: ReassignFromConnectionRole` on the
+  `DatabaseProvider` (default `Report`) or as a `LogicalDatabase` override
+  lets the operator reassign objects owned by its own connection role. New
+  flag `--ownership-check-interval` (default 30m, 0 disables). See
+  `docs/runbooks/ownership-drift.md`.
 - `SchemaSnapshot` now records every dimension the drift inspector
   reads. Enums, extensions, sequences, functions, triggers and
   materialized views are captured alongside the tables, and each view
@@ -139,7 +172,7 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
   terminal paths — converged, no-matching-schemas,
   destructive-refused, mixed-versions-refused — so all four
   conditions and `Ready` always describe the same reconcile.
-  - Observed live on `downstream-service-public-desired` after the RLS differ
+  - Observed live on `downstream-public-desired` after the RLS differ
     fix landed: `Ready=True (SchemaMatchesDesired)` and
     `pendingOperations: 0` sat next to `DiffComputed=True
     (DriftDetected) "174 statement(s) to apply"` and
@@ -174,7 +207,7 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
   idempotent, so nothing was ever wrong in the database; what was
   wrong was that the plan could never be empty, so a SchemaDefinition
   over an RLS-protected schema never reached `Ready`.
-  - Observed live on `downstream-service-public-desired`: 87 RLS-protected
+  - Observed live on `downstream-public-desired`: 87 RLS-protected
     tables → 87 `ENABLE` + 87 `FORCE` = **174 `pendingOperations`,
     recomputed every 60s indefinitely**, with `Ready=False
     (BundleEmitted)` and `Progressing=True (Applying)` pinned on
@@ -255,7 +288,7 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
   every stored hash at once while nothing about any database changed,
   and because the stored baseline is only rewritten on accept-drift,
   the report would have returned on every pass until each schema was
-  hand-accepted — downstream-service 86 findings, example-service-main ~200. The
+  hand-accepted — downstream 86 findings, falcon-id-main ~200. The
   operator now hashes the observed snapshot projected back onto the old
   model: a match against the recorded baseline proves the model was the
   only thing that changed and the baseline is restated in place;
@@ -572,5 +605,5 @@ for evaluation deployments and early integrators.
   metrics.
 - Phase 8.1 — OpenTelemetry tracing, multi-window burn-rate alerts.
 
-[v0.1.0]: https://github.com/dogukanturhal/platform/releases/tag/keystone-v0.1.0
+[v0.1.0]: https://github.com/dogukanturhal/keystone/releases/tag/keystone-v0.1.0
 [v0.1.1]: https://github.com/dogukanturhal/keystone/releases/tag/keystone-v0.1.1

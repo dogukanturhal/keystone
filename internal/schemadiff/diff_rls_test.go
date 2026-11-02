@@ -33,7 +33,7 @@ func rlsTbl(name string, enabled, forced bool) keystonev1alpha1.SnapshotTable {
 func pol(table, name, using string) keystonev1alpha1.SnapshotPolicy {
 	return keystonev1alpha1.SnapshotPolicy{
 		Name: name, Table: table, Command: "ALL", Permissive: true,
-		Roles: []string{"downstream-service_app"}, Using: using,
+		Roles: []string{"downstream_app"}, Using: using,
 	}
 }
 
@@ -181,9 +181,9 @@ func TestDiff_PermissiveToRestrictiveIsReported(t *testing.T) {
 func TestDiff_PolicyRoleReorderIsNotAChange(t *testing.T) {
 	tables := []keystonev1alpha1.SnapshotTable{rlsTbl("messages", true, true)}
 	a := pol("messages", "tenant_isolation", "tenant_id = current_tenant()")
-	a.Roles = []string{"downstream-service_app", "downstream-service_ro"}
+	a.Roles = []string{"downstream_app", "downstream_ro"}
 	b := a
-	b.Roles = []string{"downstream-service_ro", "downstream-service_app"}
+	b.Roles = []string{"downstream_ro", "downstream_app"}
 
 	rep := Diff(rlsSnap(tables, []keystonev1alpha1.SnapshotPolicy{a}),
 		rlsSnap(tables, []keystonev1alpha1.SnapshotPolicy{b}))

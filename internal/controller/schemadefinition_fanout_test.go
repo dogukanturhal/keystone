@@ -157,7 +157,7 @@ func TestBundleSchemaSelector_SchemaSelectorPath(t *testing.T) {
 		Spec: keystonev1alpha1.SchemaDefinitionSpec{
 			SchemaSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"keystone.hexxlock.io/scope": "example-service",
+					"keystone.hexxlock.io/scope": "falcon-id",
 					"keystone.hexxlock.io/tier":  "tenant",
 				},
 			},
@@ -167,7 +167,7 @@ func TestBundleSchemaSelector_SchemaSelectorPath(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "tenant-001"},
 	}
 	got := bundleSchemaSelector(sd, canonical)
-	if got.MatchLabels["keystone.hexxlock.io/scope"] != "example-service" ||
+	if got.MatchLabels["keystone.hexxlock.io/scope"] != "falcon-id" ||
 		got.MatchLabels["keystone.hexxlock.io/tier"] != "tenant" {
 		t.Errorf("schemaSelector path should mirror SD selector: got %v", got)
 	}

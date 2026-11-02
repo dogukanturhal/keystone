@@ -12,7 +12,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -74,7 +73,7 @@ import (
 type CRTTLController struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder eventRecorder
 
 	// Enabled is the global feature flag. When false the controller
 	// runs the loop and emits a "disabled" pass-duration metric on
@@ -270,6 +269,9 @@ func (c *CRTTLController) sweepBundles(
 
 	for i := range bundles.Items {
 		b := &bundles.Items[i]
+		if isArgoTracked(b) {
+			continue
+		}
 		phase, completed, terminal := classifyBundle(b)
 		if !terminal {
 			continue
@@ -425,9 +427,13 @@ func (c *CRTTLController) sweepExecutions(
 		crTTLErrorsTotal.WithLabelValues("list_bundles").Inc()
 	}
 	bundleSDOwner := make(map[string]string, len(bundles.Items)) // bundle ns/name → SD ns/name
+	argoBundles := make(map[string]bool)                         // bundle ns/name → Argo-tracked
 	for i := range bundles.Items {
 		b := &bundles.Items[i]
 		bundleSDOwner[b.Namespace+"/"+b.Name] = ownerSDKey(b.OwnerReferences, b.Namespace)
+		if isArgoTracked(b) {
+			argoBundles[b.Namespace+"/"+b.Name] = true
+		}
 	}
 
 	type execEntry struct {
@@ -449,6 +455,17 @@ func (c *CRTTLController) sweepExecutions(
 			continue
 		}
 		bundleKey := e.Namespace + "/" + e.Spec.BundleRef
+		if argoBundles[bundleKey] || isArgoTracked(e) {
+			continue
+		}
+		// A failed execution is the only record that its bundle failed.
+		// Deleting it while the bundle lives makes the bundle controller
+		// recreate it and re-run the (possibly stale) SQL, so failed
+		// executions are reaped only by the bundle's own deletion (owner
+		// cascade) or once the bundle is gone.
+		if _, bundleExists := bundleSDOwner[bundleKey]; bundleExists && isTerminalFailurePhase(phase) {
+			continue
+		}
 		ownerKey := bundleSDOwner[bundleKey] // empty when bundle is gone
 		byOwner[ownerKey] = append(byOwner[ownerKey], execEntry{
 			exec:        e,
@@ -537,7 +554,7 @@ func (c *CRTTLController) recordPassDuration(start time.Time, outcome string) {
 // Mirrors AuditEntryRetentionController.SetupWithManager.
 func (c *CRTTLController) SetupWithManager(mgr ctrl.Manager) error {
 	if c.Recorder == nil {
-		c.Recorder = mgr.GetEventRecorderFor("keystone-cr-ttl")
+		c.Recorder = eventRecorderFor(mgr, "keystone-cr-ttl")
 	}
 	return mgr.Add(manager.RunnableFunc(c.Start))
 }
@@ -590,6 +607,11 @@ func classifyBundle(b *keystonev1alpha1.MigrationBundle) (string, time.Time, boo
 		// pass will catch it.
 		return "", time.Time{}, false
 	case metav1.ConditionFalse:
+		// ExecutionsFailed / Superseded are terminal verdicts written by
+		// the bundle controller once every execution settled.
+		if ready.Reason == reasonExecutionsFailed || ready.Reason == reasonSuperseded {
+			return terminalPhaseFailed, completed, true
+		}
 		// Failure — but only if the bundle has actually been around
 		// long enough that the failure isn't just a transient mid-
 		// reconcile. We require LastPlanTime to exist (the bundle did
@@ -606,16 +628,37 @@ func classifyBundle(b *keystonev1alpha1.MigrationBundle) (string, time.Time, boo
 	}
 }
 
+// isTerminalFailurePhase reports whether a classifyExecution phase label is
+// one of the failed terminal states.
+func isTerminalFailurePhase(phase string) bool {
+	switch phase {
+	case terminalPhaseFailed, terminalPhaseAborted, terminalPhaseRollbackFailed:
+		return true
+	}
+	return false
+}
+
+// isArgoTracked reports whether Argo CD owns the object (tracking
+// annotation, or the legacy instance label). GitOps owns the lifecycle of
+// such objects; deleting them here just makes Argo recreate and re-run them.
+func isArgoTracked(o metav1.Object) bool {
+	if _, ok := o.GetAnnotations()["argocd.argoproj.io/tracking-id"]; ok {
+		return true
+	}
+	_, ok := o.GetLabels()["argocd.argoproj.io/instance"]
+	return ok
+}
+
 func bundleCompletionTime(b *keystonev1alpha1.MigrationBundle) time.Time {
 	ready := findReadyLikeCondition(b.Status.Conditions, keystonev1alpha1.ConditionTypeReady)
 	if ready != nil && !ready.LastTransitionTime.IsZero() {
-		return ready.LastTransitionTime.Time.UTC()
+		return ready.LastTransitionTime.UTC()
 	}
 	if b.Status.LastPlanTime != nil {
-		return b.Status.LastPlanTime.Time.UTC()
+		return b.Status.LastPlanTime.UTC()
 	}
 	if !b.CreationTimestamp.IsZero() {
-		return b.CreationTimestamp.Time.UTC()
+		return b.CreationTimestamp.UTC()
 	}
 	return time.Time{}
 }
@@ -644,13 +687,13 @@ func classifyExecution(e *keystonev1alpha1.MigrationExecution) (string, time.Tim
 
 func executionCompletionTime(e *keystonev1alpha1.MigrationExecution) time.Time {
 	if e.Status.CompletionTime != nil {
-		return e.Status.CompletionTime.Time.UTC()
+		return e.Status.CompletionTime.UTC()
 	}
 	if e.Status.StartTime != nil {
-		return e.Status.StartTime.Time.UTC()
+		return e.Status.StartTime.UTC()
 	}
 	if !e.CreationTimestamp.IsZero() {
-		return e.CreationTimestamp.Time.UTC()
+		return e.CreationTimestamp.UTC()
 	}
 	return time.Time{}
 }

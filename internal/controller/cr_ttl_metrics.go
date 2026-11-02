@@ -11,8 +11,8 @@ import (
 // controller-runtime global registry on package init() so the manager's
 // /metrics endpoint exposes them automatically.
 //
-// Operator alerting playbook (PrometheusRule ships separately, in
-// your GitOps repository):
+// Operator alerting playbook (PrometheusRule landing in
+// the GitOps repository in a separate MR):
 //
 //   - rate(keystone_cr_ttl_deleted_total[1h]) == 0 AND
 //     keystone_cr_ttl_candidates > 0

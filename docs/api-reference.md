@@ -854,6 +854,7 @@ _Appears in:_
 | `sslMode` _[DatabaseProviderSSLMode](#databaseprovidersslmode)_ | SSLMode controls TLS verification. `disable` is intentionally<br />unavailable; downgrade requires an out-of-band policy override. | verify-full | Enum: [require verify-ca verify-full] <br /> |
 | `adminCredentialsRef` _[DatabaseProviderCredentials](#databaseprovidercredentials)_ | AdminCredentialsRef references the Secret holding admin user/password. |  | Required: \{\} <br /> |
 | `poolMaxConns` _integer_ | PoolMaxConns caps the controller's pgx pool size against this<br />provider. Higher values speed up large-fanout reconciles but consume<br />more PG backends; tune per workload. | 4 | Maximum: 64 <br />Minimum: 1 <br /> |
+| `ownershipRemediation` _string_ | OwnershipRemediation controls what the LogicalDatabase controller does<br />about objects in managed schemas that are not owned by the database's<br />ownerRole.<br />  Report                      — report only (condition, status, metrics).<br />  ReassignFromConnectionRole  — also ALTER ... OWNER TO ownerRole for<br />                                drifted objects owned by this provider's<br />                                admin (connection) role. Objects owned by<br />                                other roles, RLS-unforced tables, views<br />                                and partition/inheritance children that<br />                                depend on RLS tables,<br />                                SECURITY DEFINER routines, owned<br />                                sequences and schemas stay report-only.<br />Lives on the provider (not only on LogicalDatabase) because SDK<br />enrolment overwrites realm LogicalDatabase specs wholesale. A<br />LogicalDatabase may override it via its own spec.ownershipRemediation. | Report | Enum: [Report ReassignFromConnectionRole] <br /> |
 
 
 #### DatabaseProviderStatus
@@ -963,7 +964,7 @@ _Appears in:_
 | `observedGeneration` _integer_ | ObservedGeneration is the .metadata.generation last reconciled. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions reports the current state. Standard set: Ready, Available,<br />Progressing, Degraded. Migration-specific conditions (Applied,<br />DriftFree) are added by the MigrationController in Phase 3. |  |  |
 | `migrationVersion` _string_ | MigrationVersion is the highest schema_migrations version applied to<br />this schema. Surfaced by the MigrationController; null until the<br />first migration runs. |  |  |
-| `lastAppliedFingerprint` _string_ | LastAppliedFingerprint is the SchemaDefinition.Status.Fingerprint<br />value of the most recent SD-emitted MigrationBundle that the<br />runner applied to this schema successfully. The bundle controller<br />stamps it after a MigrationExecution reaches Phase=Succeeded for<br />(this schema, the bundle carrying the SD fingerprint annotation).<br />SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) compare<br />this field against SchemaDefinition.Status.Fingerprint to verify<br />per-schema convergence — race-free vs the matchedSchemas-count<br />baseline that WaitSchemaUpToDate (v0.1.47) uses.<br />Empty until the SD-emit-then-apply cycle has run at least once<br />for this schema. Hand-authored MigrationBundles (no SD owner)<br />don't carry the SD fingerprint annotation and won't update this<br />field; that's intentional — fingerprint convergence is an<br />SD-owned concept. |  | MaxLength: 64 <br /> |
+| `lastAppliedFingerprint` _string_ | LastAppliedFingerprint is the SchemaDefinition.Status.Fingerprint<br />value of the most recent SD-emitted MigrationBundle that the<br />runner applied to this schema successfully. The bundle controller<br />stamps it after a MigrationExecution reaches Phase=Succeeded for<br />(this schema, the bundle carrying the SD fingerprint annotation).<br />SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare<br />this field against SchemaDefinition.Status.Fingerprint to verify<br />per-schema convergence — race-free vs the matchedSchemas-count<br />baseline that WaitSchemaUpToDate (v0.1.47) uses.<br />Empty until the SD-emit-then-apply cycle has run at least once<br />for this schema. Hand-authored MigrationBundles (no SD owner)<br />don't carry the SD fingerprint annotation and won't update this<br />field; that's intentional — fingerprint convergence is an<br />SD-owned concept. |  | MaxLength: 64 <br /> |
 | `lastReconcileTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastReconcileTime is when the controller last successfully reconciled<br />this resource. |  |  |
 
 
@@ -1027,15 +1028,15 @@ Semantics:
 Idempotent in PostgreSQL — re-issuing the same grant against the
 same role/schema/object-type is a no-op (pg_default_acl uniqueness).
 
-Practical example for the example-service 2026-05-12 fix:
+Practical example for the falcon-id 2026-05-12 fix:
 
 	defaultPrivileges:
 	  - forRole: keystone_admin
-	    toRole:  example_service_app
+	    toRole:  falcon_id_app
 	    objectType: tables
 	    privileges: [SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER]
 	  - forRole: keystone_admin
-	    toRole:  example_service_app
+	    toRole:  falcon_id_app
 	    objectType: sequences
 	    privileges: [USAGE, SELECT, UPDATE]
 
@@ -1849,7 +1850,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `name` _string_ | Name is the actual PostgreSQL database name. Distinct from<br />metadata.name: PG identifiers commonly use underscores (e.g.<br />example_suite) while Kubernetes resources prefer hyphens<br />(example-suite). Required so this never has to be inferred. |  | MaxLength: 63 <br />Pattern: `^[a-z_][a-z0-9_]*$` <br />Required: \{\} <br /> |
+| `name` _string_ | Name is the actual PostgreSQL database name. Distinct from<br />metadata.name: PG identifiers commonly use underscores (e.g.<br />example_suite) while Kubernetes resources prefer hyphens<br />(examplesuite). Required so this never has to be inferred. |  | MaxLength: 63 <br />Pattern: `^[a-z_][a-z0-9_]*$` <br />Required: \{\} <br /> |
 | `clusterRef` _string_ | ClusterRef is the name of the ClusterRegistration this database<br />belongs to from a workload-rollout perspective. Used by the<br />RolloutController (Phase 7) and DriftController (Phase 5) to scope<br />per-cluster operations. NOT used by the SchemaController for<br />connectivity — that goes via ProviderRef. |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `providerRef` _string_ | ProviderRef is the name of the DatabaseProvider hosting this<br />database. The SchemaController opens admin sessions against this<br />provider to CREATE DATABASE / CREATE ROLE / CREATE EXTENSION. A<br />LogicalDatabase belongs to exactly one provider; cross-provider<br />replication is out of scope (use a ReplicationPolicy in Phase 6+). |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `deletionPolicy` _string_ | DeletionPolicy controls what happens to the underlying PostgreSQL<br />database when the LogicalDatabase resource is deleted. Defaults to<br />Retain — deleting a CR never drops production data. Operators must<br />explicitly opt in to Delete for tear-down workflows. | Retain | Enum: [Retain Delete] <br /> |
@@ -1859,8 +1860,9 @@ _Appears in:_
 | `collation` _string_ | Collation overrides the default LC_COLLATE. Like Encoding, this is<br />fixed at CREATE time. | C | MaxLength: 64 <br /> |
 | `ctype` _string_ | Ctype overrides the default LC_CTYPE. Fixed at CREATE time. | C | MaxLength: 64 <br /> |
 | `connectionLimit` _integer_ | ConnectionLimit caps the maximum concurrent connections (PostgreSQL<br />`CONNECTION LIMIT` clause). -1 means unlimited (PostgreSQL default). | -1 | Minimum: -1 <br /> |
-| `trackingTableName` _string_ | TrackingTableName is the table name Keystone writes migration<br />bookkeeping into. Defaults to "schema_migrations" — the<br />golang-migrate convention — which is the right choice on greenfield<br />databases.<br />Override when adopting Keystone on a database that already has a<br />migrator managing its own `schema_migrations`. Example Service is the<br />canonical example: its existing table has `version INTEGER PK`<br />while Keystone's runner uses `version TEXT PK`. Setting<br />trackingTableName to "keystone_schema_migrations" lets both<br />trackers co-exist without touching production history. | schema_migrations | MaxLength: 63 <br />Pattern: `^[a-z_][a-z0-9_]*$` <br /> |
+| `trackingTableName` _string_ | TrackingTableName is the table name Keystone writes migration<br />bookkeeping into. Defaults to "schema_migrations" — the<br />golang-migrate convention — which is the right choice on greenfield<br />databases.<br />Override when adopting Keystone on a database that already has a<br />migrator managing its own `schema_migrations`. Falcon-ID is the<br />canonical example: its existing table has `version INTEGER PK`<br />while Keystone's runner uses `version TEXT PK`. Setting<br />trackingTableName to "keystone_schema_migrations" lets both<br />trackers co-exist without touching production history. | schema_migrations | MaxLength: 63 <br />Pattern: `^[a-z_][a-z0-9_]*$` <br /> |
 | `ownerRolePasswordSecretRef` _[SecretKeySelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#secretkeyselector-v1-core)_ | OwnerRolePasswordSecretRef references a Kubernetes Secret containing<br />the password the reconciler should set on OwnerRole when creating it<br />(and when rotating it on subsequent reconciles where the Secret<br />content changes).<br />The Secret MUST exist in the SAME namespace as the LogicalDatabase<br />resource. The reconciler reads spec.ownerRolePasswordSecretRef.name<br />from that namespace and reads the value at spec.ownerRolePassword<br />SecretRef.key. Cross-namespace references are intentionally<br />disallowed — the LogicalDatabase namespace gates who can change the<br />password.<br />When unset, EnsureRole creates the role WITHOUT a password. The<br />PostgreSQL admin can then assign one out-of-band (e.g. via Vault<br />dynamic secrets engine, manual psql, or any other mechanism) — the<br />pre-passwordSecretRef behavior. Backward-compatible: existing<br />LogicalDatabases without this field reconcile identically to v0.1.53.<br /># Standalone-product design note<br />SecretKeySelector is a vanilla corev1 type — the same pattern used<br />by cert-manager (Issuer.spec.vault.auth.appRole.secretRef),<br />CloudNativePG (Cluster.spec.bootstrap.initdb.passwordSecret),<br />Crunchy Postgres Operator (PostgresCluster.spec.users[].password.<br />secretName), Zalando Postgres Operator (postgresql.spec.users) and<br />many others. No vendor lock-in: any Secret-source operator<br />(External Secrets, kubernetes-external-secrets, Vault Agent<br />Injector, Reflector, plain kubectl-created Secrets) can populate<br />the referenced Secret and Keystone reads it the same way.<br /># Rotation<br />On every reconcile the controller compares the password in the<br />referenced Secret with what was last written to the role<br />(cached in status.observedPasswordHash). On change, the<br />controller issues ALTER ROLE … PASSWORD '<new>' to rotate the<br />PostgreSQL password atomically. ExternalSecrets/Vault rotation<br />flows therefore Just Work: rotate the source → ESO refreshes the<br />Secret → next reconcile applies ALTER ROLE. |  |  |
+| `ownershipRemediation` _string_ | OwnershipRemediation overrides the DatabaseProvider's<br />spec.ownershipRemediation for this database. Empty (the default)<br />inherits the provider's setting; the provider defaults to Report.<br />  Report                      — only report OwnershipDrift (condition,<br />                                status summary, metrics).<br />  ReassignFromConnectionRole  — additionally ALTER ... OWNER TO<br />                                spec.ownerRole for drifted objects<br />                                currently owned by the provider's<br />                                connection role. Objects owned by any<br />                                other role, RLS-unforced tables, views<br />                                and partition/inheritance children that<br />                                depend on RLS tables,<br />                                SECURITY DEFINER routines, owned<br />                                sequences and schemas stay report-only.<br />Deliberately has no default so "unset" can mean "inherit". |  | Enum: [Report ReassignFromConnectionRole] <br /> |
 
 
 #### LogicalDatabaseStatus
@@ -1882,6 +1884,7 @@ _Appears in:_
 | `sizeBytes` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | SizeBytes is the on-disk size of the database, refreshed periodically<br />by the SchemaController. Approximate (snapshot at last reconcile). |  |  |
 | `lastReconcileTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastReconcileTime is when the controller last successfully reconciled<br />this resource. Used to detect stuck reconciliations. |  |  |
 | `observedPasswordHash` _string_ | ObservedPasswordHash is the SHA-256 (hex) of the password the<br />controller most recently applied to spec.ownerRole via CREATE ROLE<br />or ALTER ROLE PASSWORD. Compared against the live password in the<br />referenced spec.ownerRolePasswordSecretRef on each reconcile so<br />rotation (Secret content change) triggers exactly one ALTER ROLE<br />PASSWORD per change.<br />Empty when spec.ownerRolePasswordSecretRef is unset, OR when the<br />role was created with no password (legacy / out-of-band-password<br />path).<br />Stored as a hash, not the password itself, so leaking status never<br />leaks credentials. |  | MaxLength: 64 <br /> |
+| `ownershipDrift` _[OwnershipDriftStatus](#ownershipdriftstatus)_ | OwnershipDrift summarises the last ownership check: objects inside<br />the managed schemas whose owner is not the expected role. Report-only<br />by default; it never gates Ready. See the OwnershipDrift condition. |  |  |
 
 
 #### MigrationBundle
@@ -1985,7 +1988,8 @@ _Appears in:_
 | `currentStage` _string_ | CurrentStage is the active rollout stage when a RolloutPolicy is<br />in effect. Empty when the bundle uses no policy. |  | MaxLength: 63 <br /> |
 | `stageHistory` _[StageProgress](#stageprogress) array_ | StageHistory records progress through each stage of the<br />referenced RolloutPolicy. Append-only. |  | MaxItems: 16 <br /> |
 | `lintFindings` _[LintFinding](#lintfinding) array_ | LintFindings holds analyzer output from the plan phase. Populated<br />on every reconcile by the default analyzer registry (20 rules<br />today; configurable via SchemaPolicy in a later phase).<br />Cleared when no findings. Findings at severity >= "error" block<br />Ready=True. |  | MaxItems: 512 <br /> |
-| `contentHash` _string_ | ContentHash is the SHA-256 of the resolved source content at the<br />last reconcile. Used by the admission webhook to detect<br />version-pinning violations (same Version, different SQL). |  | MaxLength: 64 <br /> |
+| `contentHash` _string_ | ContentHash is the SHA-256 of the resolved source content pinned for<br />ContentHashVersion. Used by the admission webhook to detect<br />version-pinning violations (same Version, different SQL). |  | MaxLength: 64 <br /> |
+| `contentHashVersion` _string_ | ContentHashVersion is the spec.version to which ContentHash belongs.<br />Empty on legacy objects: the controller recovers the last pinned<br />version from executions or the last Planned condition, falling back<br />to spec.version when no historical evidence exists.<br />No default: existing objects must retain their legacy meaning. |  | MaxLength: 253 <br /> |
 | `integrity` _[IntegrityStatus](#integritystatus)_ | Integrity reports the outcome of verifying the bundle's resolved<br />source against its committed keystone.sum sidecar. Populated on<br />every reconcile. Empty when the bundle has never been resolved. |  |  |
 | `approval` _[ApprovalSummary](#approvalsummary)_ | Approval reports the outcome of evaluating the bundle against<br />every matched SchemaPolicy.spec.approvalPolicies. Populated on<br />every reconcile; empty when no matching policy declares approval<br />rules. The matching condition ConditionTypeApproved carries the<br />True/False/Unknown signal; this struct carries the per-policy<br />detail that operators need to triage "why isn't my bundle<br />admitting?" from kubectl describe alone. |  |  |
 | `schemaProgress` _[SchemaProgress](#schemaprogress) array_ | SchemaProgress is the per-schema rollout breakdown — one entry<br />per DatabaseSchema matched by spec.schemaSelector. Populated on<br />every reconcile; stale entries (schema no longer matched) are<br />pruned. Used for "kubectl describe migrationbundle" visibility<br />and dashboards that need per-tenant granularity rather than the<br />aggregate matched/applied counts above.<br />Capped at 256 entries so the status CR stays within etcd's<br />1.5 MiB value-size ceiling even on large multi-tenant fanouts;<br />bundles matching more than 256 schemas must rely on the<br />per-execution MigrationExecution CR list for full visibility. |  | MaxItems: 256 <br /> |
@@ -2112,7 +2116,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `repository` _string_ | Repository is the full OCI reference without the tag/digest,<br />e.g., "ghcr.io/dogukanturhal/migrations/billing". |  | MaxLength: 512 <br />Required: \{\} <br /> |
+| `repository` _string_ | Repository is the full OCI reference without the tag/digest,<br />e.g., "registry.example.com/migrations/billing". |  | MaxLength: 512 <br />Required: \{\} <br /> |
 | `tag` _string_ | Tag is the OCI tag to pull. Mutually exclusive with Digest.<br />When both are empty, defaults to "latest". |  | MaxLength: 128 <br /> |
 | `digest` _string_ | Digest is the OCI manifest digest (e.g., sha256:abc123...).<br />Preferred over Tag for immutable references. When set, Tag is<br />ignored. |  | MaxLength: 128 <br />Pattern: `^(sha256:[0-9a-f]\{64\})?$` <br /> |
 | `filePattern` _string_ | FilePattern filters which files from the artifact are treated<br />as SQL migrations. Defaults to "*.up.sql". | *.up.sql | MaxLength: 64 <br /> |
@@ -2350,6 +2354,46 @@ _Appears in:_
 | `MostBehindWins` | MixedVersionPolicyMostBehindWins emits a bundle keyed off the<br />most-behind schema; idempotent SQL handles ahead-tenants.<br /> |
 
 
+#### OwnershipDriftGroup
+
+
+
+OwnershipDriftGroup is one (kind, owner) bucket of drifted objects.
+
+
+
+_Appears in:_
+- [OwnershipDriftStatus](#ownershipdriftstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `kind` _string_ | Kind is the object kind (table, function, enum, ...). |  | MaxLength: 256 <br /> |
+| `owner` _string_ | Owner is the current owning role. |  | MaxLength: 256 <br /> |
+| `count` _integer_ | Count is the number of objects in this bucket. |  |  |
+| `remediable` _integer_ | Remediable is how many of them the operator may reassign. |  |  |
+| `sample` _string array_ | Sample lists a few schema-qualified identifiers from the bucket. |  | MaxItems: 5 <br />items:MaxLength: 256 <br /> |
+
+
+#### OwnershipDriftStatus
+
+
+
+OwnershipDriftStatus is the bounded summary of the last ownership check.
+
+
+
+_Appears in:_
+- [LogicalDatabaseStatus](#logicaldatabasestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `lastCheckTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastCheckTime is when the check last completed. |  |  |
+| `expectedOwner` _string_ | ExpectedOwner is spec.ownerRole at the time of the check. |  | MaxLength: 256 <br /> |
+| `driftedObjects` _integer_ | DriftedObjects is the total number of objects with an unexpected owner. |  |  |
+| `remediable` _integer_ | Remediable is how many of those the operator could reassign when<br />remediation is enabled (owned by the connection role, not blocked). |  |  |
+| `groups` _[OwnershipDriftGroup](#ownershipdriftgroup) array_ | Groups breaks the drift down by (kind, current owner). |  | MaxItems: 32 <br /> |
+
+
 #### PlanApprovalMode
 
 _Underlying type:_ _string_
@@ -2437,8 +2481,8 @@ _Appears in:_
 
 
 ProductDatabase describes one logical database the product needs.
-A product may declare multiple databases (e.g. a core database
-plus a separate financials database).
+A product may declare multiple databases (e.g. example_suite +
+hexxlock_financials for ExampleSuite).
 
 
 
@@ -2448,7 +2492,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `key` _string_ | Key is a stable identifier the product code uses to refer to<br />this database (e.g. "core", "billing"). Required so the controller<br />can name child LogicalDatabase resources predictably. |  | MaxLength: 32 <br />Pattern: `^[a-z][a-z0-9_-]*$` <br />Required: \{\} <br /> |
-| `nameTemplate` _string_ | Name is the actual PostgreSQL database name template. Tokens<br />\{\{tenantID\}\} and \{\{productSlug\}\} are substituted by the<br />TenancyController at instantiation. Example: "example_suite_\{\{tenantID\}\}". |  | MaxLength: 63 <br />Required: \{\} <br /> |
+| `nameTemplate` _string_ | Name is the actual PostgreSQL database name template. Tokens<br />\{\{tenantID\}\} and \{\{productSlug\}\} are substituted by the<br />TenancyController at instantiation. Example: "example_\{\{tenantID\}\}". |  | MaxLength: 63 <br />Required: \{\} <br /> |
 | `providerRef` _string_ | ProviderRef pins the DatabaseProvider this database lands on. A<br />product instance with multiple databases may spread across<br />providers; it's a deliberate decision the product author makes. |  | MaxLength: 253 <br />Required: \{\} <br /> |
 | `isolation` _[IsolationMode](#isolationmode)_ | Isolation overrides the product-level default for this database.<br />Use to silo PCI-relevant data (billing) while keeping the rest in<br />bridge mode. |  | Enum: [pool bridge silo] <br /> |
 | `schemas` _[ProductSchema](#productschema) array_ | Schemas declares the schemas that should exist within this<br />database. Each becomes a DatabaseSchema CR. |  | MaxItems: 128 <br /> |
@@ -2624,7 +2668,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `tenantID` _string_ | TenantID is the UUID identifying the tenant. Cross-referenced<br />against Example Service's tenant directory; the controller does NOT<br />validate the UUID exists there (that's the orchestrator's<br />responsibility upstream). |  | MaxLength: 36 <br />Pattern: `^[0-9a-fA-F]\{8\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{12\}$` <br />Required: \{\} <br /> |
+| `tenantID` _string_ | TenantID is the UUID identifying the tenant. Cross-referenced<br />against Falcon-ID's tenant directory; the controller does NOT<br />validate the UUID exists there (that's the orchestrator's<br />responsibility upstream). |  | MaxLength: 36 <br />Pattern: `^[0-9a-fA-F]\{8\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{12\}$` <br />Required: \{\} <br /> |
 | `tenantSlug` _string_ | TenantSlug is a human-readable tenant identifier surfaced in audit<br />logs and dashboards. Optional; many SaaS shops use the email<br />domain or organisation name. |  | MaxLength: 63 <br /> |
 | `productRef` _string_ | ProductRef is the ProductDefinition.metadata.name. Cluster-scoped<br />reference (ProductDefinition is cluster-scoped). |  | MaxLength: 253 <br />Required: \{\} <br /> |
 | `isolationOverride` _[IsolationMode](#isolationmode)_ | IsolationOverride forces a specific isolation mode for this<br />instance, regardless of the product's defaultIsolation. Use to<br />silo a high-compliance customer in an otherwise pool/bridge<br />product. Empty = use the product's default per-database setting. |  | Enum: [pool bridge silo] <br /> |
@@ -2852,7 +2896,7 @@ Exactly one of SchemaRef (singular) and SchemaSelector (fan-out)
 must be set. Mixing both is rejected by admission. SchemaRef stays
 the default for single-tenant definitions; SchemaSelector enables
 one SchemaDefinition to drive every DatabaseSchema in a tenant pool
-(the realm-DB pattern in example-service, business-module DBs in example-suite,
+(the realm-DB pattern in falcon-id, business-module DBs in examplesuite,
 etc.) without per-tenant CR boilerplate.
 
 
@@ -2875,9 +2919,10 @@ _Appears in:_
 | `policies` _[DesiredPolicy](#desiredpolicy) array_ | Policies are PostgreSQL row-level security policies. Requires<br />enableRLS=true on the target table. |  | MaxItems: 256 <br /> |
 | `triggers` _[DesiredTrigger](#desiredtrigger) array_ | Triggers are PostgreSQL trigger bindings. The referenced<br />function must exist in spec.functions or already in the DB. |  | MaxItems: 256 <br /> |
 | `allowDestructive` _boolean_ | AllowDestructive gates whether the differ may emit<br />DROP TABLE / DROP COLUMN operations. Default false: the<br />SchemaDefinitionReconciler refuses to plan destructive changes<br />silently. Operators flip this on a per-SchemaDefinition basis<br />when they've reviewed the diff and decided the drop is safe. | false |  |
-| `defaultPrivileges` _[DesiredDefaultPrivilege](#desireddefaultprivilege) array_ | DefaultPrivileges declares per-role `ALTER DEFAULT PRIVILEGES`<br />that should hold against this schema. Every entry expands at<br />reconcile time to:<br />  ALTER DEFAULT PRIVILEGES FOR ROLE <ForRole><br />    IN SCHEMA <Schema OR sd.targetSchema><br />    GRANT <Privileges> ON <ObjectType> TO <ToRole>;<br />Why this exists (gap surfaced 2026-05-12 on example-service migration<br />234): the operator-emitted bundles run CREATE TABLE as the<br />keystone_admin role. Pre-Keystone default-privileges were set<br />for the `postgres` role, so any keystone_admin-created table<br />silently dropped out of the example_service_app grant chain. The<br />BackchannelLogoutDrainer spammed SQLSTATE 42501 every 5s until<br />a hand-authored migration bundle re-pointed ALTER DEFAULT<br />PRIVILEGES at keystone_admin. With DefaultPrivileges declared<br />here, that recovery is no longer hand-authored — the SD<br />reconciler emits the ALTER DEFAULT PRIVILEGES statement as part<br />of the bundle so every future keystone_admin-created table<br />inherits the grant chain automatically. |  | MaxItems: 64 <br /> |
+| `retainTables` _string array_ | RetainTables names tables the differ must never DROP, even with<br />allowDestructive=true. A table that exists in the database but is<br />absent from spec.tables is then left alone (the differ records a<br />warning) instead of being planned for removal. Use for tables owned<br />outside this SchemaDefinition: hand-written migrations, other<br />services, or legacy tables awaiting an explicit decision. |  | MaxItems: 1024 <br /> |
+| `defaultPrivileges` _[DesiredDefaultPrivilege](#desireddefaultprivilege) array_ | DefaultPrivileges declares per-role `ALTER DEFAULT PRIVILEGES`<br />that should hold against this schema. Every entry expands at<br />reconcile time to:<br />  ALTER DEFAULT PRIVILEGES FOR ROLE <ForRole><br />    IN SCHEMA <Schema OR sd.targetSchema><br />    GRANT <Privileges> ON <ObjectType> TO <ToRole>;<br />Why this exists (gap surfaced 2026-05-12 on falcon-id migration<br />234): the operator-emitted bundles run CREATE TABLE as the<br />keystone_admin role. Pre-Keystone default-privileges were set<br />for the `postgres` role, so any keystone_admin-created table<br />silently dropped out of the falcon_id_app grant chain. The<br />BackchannelLogoutDrainer spammed SQLSTATE 42501 every 5s until<br />a hand-authored migration bundle re-pointed ALTER DEFAULT<br />PRIVILEGES at keystone_admin. With DefaultPrivileges declared<br />here, that recovery is no longer hand-authored — the SD<br />reconciler emits the ALTER DEFAULT PRIVILEGES statement as part<br />of the bundle so every future keystone_admin-created table<br />inherits the grant chain automatically. |  | MaxItems: 64 <br /> |
 | `applyStrategy` _string_ | ApplyStrategy selects how the generated MigrationBundle is<br />written: "versioned" (raw ALTER statements) or<br />"pgroll-expand-contract" (zero-downtime for drop/rename/alter).<br />Default "versioned" for greenfield schemas where locks are OK. | versioned | Enum: [versioned pgroll-expand-contract] <br /> |
-| `policyRef` _string_ | PolicyRef is the SchemaPolicy the reconciler stamps onto the<br />auto-generated MigrationBundle. When empty, the default<br />"production-safety" policy is applied — this matches the value<br />used by every hand-authored bundle in the GitOps repository<br />and ensures the downstream MigrationBundle controller has a<br />policy to look up (without a policyRef, the bundle pipeline<br />stalls before creating a MigrationPlan). |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br /> |
+| `policyRef` _string_ | PolicyRef is the SchemaPolicy the reconciler stamps onto the<br />auto-generated MigrationBundle. When empty, the default<br />"production-safety" policy is applied — this matches the value<br />used by every hand-authored bundle in the the GitOps repository repo<br />and ensures the downstream MigrationBundle controller has a<br />policy to look up (without a policyRef, the bundle pipeline<br />stalls before creating a MigrationPlan). |  | MaxLength: 253 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br /> |
 | `cleanup` _[CleanupPolicy](#cleanuppolicy)_ | Cleanup configures the per-SD TTL policy applied to terminal<br />MigrationBundle and MigrationExecution CRs owned by this<br />SchemaDefinition. Without this controller running, terminal CRs<br />accumulate without bound — the 2026-05-08 incident demonstrated<br />the failure mode at 182 954 AuditEntries / 4.7 GB etcd / 17 h<br />apiserver outage. (AuditEntry has its own off-cluster archive<br />path under spec.archive on AuditLog; this Cleanup field covers<br />the operator's own transient bundles + executions whose payload<br />stays on-cluster.)<br />Nil = use the operator-wide defaults (24 h success / 7 d<br />failure). Non-terminal CRs (Pending / Running / Expanding /<br />Aborting / RollingBack) are NEVER deleted regardless of age —<br />the controller only acts on Succeeded / Failed / Aborted /<br />RolledBack / RollbackFailed phases. The latest succeeded<br />MigrationBundle and the latest succeeded MigrationExecution per<br />(SD, schema) tuple are always retained so the SD reconciler can<br />re-emit decisions and operators can read "what last shipped".<br />Behind the operator-level --enable-cr-ttl feature flag (default<br />off for first release) so existing clusters opt in deliberately. |  |  |
 
 
@@ -2901,7 +2946,7 @@ _Appears in:_
 | `pendingOperations` _integer_ | PendingOperations counts the diff size from the last reconcile.<br />0 means the schema is at desired state. When SchemaSelector<br />fan-out is used this reflects the size of the emitted bundle's<br />op set (i.e. the most-behind schema's diff under MostBehindWins<br />policy, or the lockstep diff under Refuse with all schemas in<br />agreement). |  |  |
 | `lastDiffTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | LastDiffTime is when the differ last ran. |  |  |
 | `matchedSchemas` _integer_ | MatchedSchemas is the count of DatabaseSchemas the reconciler<br />resolved on the last pass. 1 for SchemaRef, N for SchemaSelector.<br />Surfaces fan-out width on `kubectl get sd`. |  |  |
-| `fingerprint` _string_ | Fingerprint is a deterministic hash of the SD's desired-state<br />spec (tables + columns + indexes + functions + ... — same<br />inputs the differ consumes). Recomputed on every reconcile;<br />changes whenever the operator edits the spec. The SD reconciler<br />stamps this on every emitted MigrationBundle as the annotation<br />`keystone.hexxlock.io/sd-fingerprint`; the bundle runner copies<br />it onto DatabaseSchema.Status.LastAppliedFingerprint when a<br />MigrationExecution succeeds for that schema.<br />SDK consumers (keystone-sdk/go/keystone.WaitSchemaFingerprint) compare<br />this against per-schema LastAppliedFingerprint to verify<br />convergence in an identity-based, race-free way.<br />Empty when the spec has never been hashed (very first reconcile<br />of a freshly-applied SD). |  | MaxLength: 64 <br /> |
+| `fingerprint` _string_ | Fingerprint is a deterministic hash of the SD's desired-state<br />spec (tables + columns + indexes + functions + ... — same<br />inputs the differ consumes). Recomputed on every reconcile;<br />changes whenever the operator edits the spec. The SD reconciler<br />stamps this on every emitted MigrationBundle as the annotation<br />`keystone.hexxlock.io/sd-fingerprint`; the bundle runner copies<br />it onto DatabaseSchema.Status.LastAppliedFingerprint when a<br />MigrationExecution succeeds for that schema.<br />SDK consumers (pkg/sdk/keystone.WaitSchemaFingerprint) compare<br />this against per-schema LastAppliedFingerprint to verify<br />convergence in an identity-based, race-free way.<br />Empty when the spec has never been hashed (very first reconcile<br />of a freshly-applied SD). |  | MaxLength: 64 <br /> |
 | `driftedSchemas` _[DriftedSchema](#driftedschema) array_ | DriftedSchemas lists DatabaseSchemas whose observed shapes<br />diverge from the lockstep set when SchemaSelector + MixedVersion<br />Policy=Refuse is in effect. Empty under MostBehindWins (the<br />reconciler proceeds rather than recording divergence) and empty<br />under SchemaRef (no fan-out, no divergence to surface). |  | MaxItems: 1024 <br /> |
 
 

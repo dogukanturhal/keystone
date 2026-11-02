@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	"github.com/dogukanturhal/keystone-sdk/go/migration"
+	keystonev1alpha1 "github.com/dogukanturhal/keystone/api/v1alpha1"
 	pg "github.com/dogukanturhal/keystone/internal/postgres"
 )
 
@@ -60,7 +60,7 @@ func TestMigrationExecutionReconciler_FinalizerAdded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if !res.Requeue {
+	if res.RequeueAfter <= 0 {
 		t.Errorf("expected Requeue after finalizer add; got %+v", res)
 	}
 	var after keystonev1alpha1.MigrationExecution
@@ -184,7 +184,7 @@ func TestMigrationExecutionReconciler_TerminalPhaseSkipsReconcile(t *testing.T) 
 	if err != nil {
 		t.Errorf("reconcile should no-op on terminal phase; got err=%v", err)
 	}
-	if res.Requeue || res.RequeueAfter != 0 {
+	if res.RequeueAfter != 0 {
 		t.Errorf("reconcile should return zero Result on terminal phase; got %+v", res)
 	}
 	// Phase stays Succeeded.

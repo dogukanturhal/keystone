@@ -121,11 +121,11 @@ func TestCacheManagedConfigMapsSelector(t *testing.T) {
 	// schemadefinition_controller.go::emitBundle). Must match.
 	emitted := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "example-service-public-desired-sql-9d589396eb44",
+			Name:      "falcon-id-public-desired-sql-9d589396eb44",
 			Namespace: "keystone-system",
 			Labels: map[string]string{
-				keystonev1alpha1.LabelSchemaDefinition: "example-service-public-desired",
-				keystonev1alpha1.LabelSchemaRef:        "example-service-public",
+				keystonev1alpha1.LabelSchemaDefinition: "falcon-id-public-desired",
+				keystonev1alpha1.LabelSchemaRef:        "falcon-id-public",
 				keystonev1alpha1.LabelSource:           "declarative-diff",
 			},
 		},
@@ -156,12 +156,12 @@ func TestCacheManagedConfigMapsSelector(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "user-authored-bundle-sql",
-				Namespace: "example-service",
+				Namespace: "falcon-id",
 				Labels: map[string]string{
 					// User-authored ConfigMap-sourced bundle: legitimate,
 					// must NOT be in the cache (resolver reads via
 					// APIReader instead). See the resolver call sites.
-					"app": "example-service",
+					"app": "falcon-id",
 				},
 			},
 		},
