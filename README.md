@@ -1,13 +1,20 @@
 # Keystone
 
+**A Kubernetes operator that manages PostgreSQL schema migrations, tenant databases and drift detection through CRDs.**
+
 [![CI](https://github.com/dogukanturhal/keystone/actions/workflows/ci.yml/badge.svg)](https://github.com/dogukanturhal/keystone/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/dogukanturhal/keystone/api.svg)](https://pkg.go.dev/github.com/dogukanturhal/keystone/api)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dogukanturhal/keystone/badge)](https://scorecard.dev/viewer/?uri=github.com/dogukanturhal/keystone)
 
-A Kubernetes operator that manages PostgreSQL schema migrations, tenant
-databases and drift detection through CRDs, so the database follows the same
-GitOps flow as the rest of your cluster.
+Pre-1.0 (`v1alpha1` CRDs). Not independently audited. Runs in our own production.
+
+[Quickstart](#quickstart-about-5-minutes) · [Docs](docs/) · [Architecture](#architecture) · [Security](#security) · [Contributing](#contributing)
+
+The database follows the same GitOps flow as the rest of your cluster.
+
+Want to apply migrations from Go, Rust or .NET code instead of `kubectl`? See
+[keystone-sdk](https://github.com/dogukanturhal/keystone-sdk).
 
 ## Who it is for
 
@@ -76,8 +83,38 @@ kubectl -n keystone-system exec deploy/postgres -- \
   psql -U postgres -d quickstart -c '\dt app.*'
 ```
 
+Expected: the `LogicalDatabase` and `DatabaseSchema` become ready, the bundle
+creates one `MigrationPlan` and one `MigrationExecution` for the `app`
+schema, and `\dt app.*` lists `app.notes` plus the migration tracking table.
+
 The quickstart disables the admission webhooks (they need cert-manager) and
 uses a single replica. Do not use `hack/quickstart` outside a test cluster.
+
+## Architecture
+
+Controllers in one leader-elected `keystone-manager` Deployment reconcile
+the custom resources in group `keystone.hexxlock.io`. Drift detection is
+periodic (default: hourly, `--drift-check-interval`), not event-driven.
+
+```mermaid
+flowchart LR
+  Git["Git (Argo CD / Flux)"] --> MB[MigrationBundle]
+  RP[RolloutPolicy] -.-> MB
+  MB --> MP[MigrationPlan]
+  SP[SchemaPolicy] -.->|approval, lint| MP
+  MP --> ME[MigrationExecution]
+  ME -->|apply SQL| PG[(PostgreSQL)]
+  ME --> SS[SchemaSnapshot]
+  DC[Drift controller] -->|inspect, periodic| PG
+  DC --> DR[DriftReport]
+  ME --> AE[AuditEntry]
+```
+
+`DatabaseProvider`, `LogicalDatabase` and `DatabaseSchema` (not shown) create
+the databases and schemas that bundles select with `schemaSelector`. A
+bundle produces one plan and one execution per matching schema; with a
+`rolloutPolicyRef` the executions are ordered by stage instead of fanned out
+at once.
 
 ## How it compares
 
@@ -93,27 +130,15 @@ uses a single replica. Do not use `hack/quickstart` outside a test cluster.
 - **[SchemaHero](https://github.com/schemahero/schemahero).** Declarative,
   Kubernetes-native table definitions. Keystone also supports plain SQL
   migrations and expand/contract.
-- **[CloudNativePG](https://cloudnative-pg.io/).** Complementary: it runs the
-  PostgreSQL cluster, Keystone manages what is inside it. Point a
-  `DatabaseProvider` at a CloudNativePG service.
-
-## Architecture
-
-```
- Git ──(Argo CD / Flux)──► CRs: DatabaseProvider, LogicalDatabase,
-                                DatabaseSchema, MigrationBundle, policies
-                                        │
-                              ┌─────────▼──────────┐
-                              │  keystone-manager  │  one Deployment, leader-elected
-                              │  controllers       │
-                              │  admission webhook │
-                              └───┬──────────┬─────┘
-          MigrationPlan ► MigrationExecution  │   DriftReport / SchemaSnapshot
-                                  │           │   AuditEntry ──► NATS / stdout
-                          ┌───────▼───────────▼──┐
-                          │   PostgreSQL server  │  admin credentials from a Secret
-                          └──────────────────────┘
-```
+- **[CloudNativePG](https://cloudnative-pg.io/) (in-cluster PostgreSQL
+  flows).** Complementary: it runs the PostgreSQL cluster, Keystone manages
+  what is inside it. Point a `DatabaseProvider` at a CloudNativePG service.
+- **[pgroll](https://github.com/xataio/pgroll).** The reference tool for
+  expand/contract migrations. Keystone implements a subset (three
+  operations at the time ADR 0013 was written) and runs it from a CRD. If you
+  need the full operation set, use upstream pgroll; the reasoning and the
+  trade-off are in
+  [ADR 0013](docs/adrs/0013-pgroll-subset-vs-upstream.md).
 
 ## Status and limitations
 
@@ -141,9 +166,34 @@ webhooks need cert-manager or your own serving certificate; the container
 image is published from tagged releases only, so build it yourself until the
 first release is cut.
 
-More documentation is in [docs/](docs/): [runbook](docs/runbook.md),
-[migration authoring](docs/migration-authoring.md),
-[hardening](docs/operator-hardening.md), [ADRs](docs/adrs/README.md).
+## Documentation
+
+[docs/](docs/): [getting started](docs/getting-started.md),
+[runbook](docs/runbook.md), [migration authoring](docs/migration-authoring.md),
+[hardening](docs/operator-hardening.md), [roadmap](docs/roadmap.md),
+[ADRs](docs/adrs/README.md).
+
+## Project
+
+- [MAINTAINERS.md](MAINTAINERS.md) and [GOVERNANCE.md](GOVERNANCE.md): who
+  decides and how.
+- [API_STABILITY.md](API_STABILITY.md): what may change in the CRDs.
+- [CHANGELOG.md](CHANGELOG.md) and [docs/roadmap.md](docs/roadmap.md).
+- [ADOPTERS.md](ADOPTERS.md): no third-party adopters yet. Using it? Open a PR
+  adding yourself.
+- Questions and ideas: [GitHub Discussions](https://github.com/dogukanturhal/keystone/discussions).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Commits need a DCO sign-off
+(`git commit -s`). Be kind: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Security
+
+Report vulnerabilities privately through
+[GitHub private vulnerability reporting](https://github.com/dogukanturhal/keystone/security/advisories/new)
+or by email to dogukanturhal@hexxlock.com; details are in
+[SECURITY.md](SECURITY.md). Do not open a public issue for them.
 
 ## License
 
@@ -153,13 +203,3 @@ More documentation is in [docs/](docs/): [runbook](docs/runbook.md),
   `api/` carry `Apache-2.0` SPDX identifiers.
 
 See [NOTICE](NOTICE) for third-party software.
-
-## Security
-
-Report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
-Do not open a public issue for them.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Commits need a DCO sign-off
-(`git commit -s`). Be kind: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
