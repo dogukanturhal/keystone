@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Sample ProductInstance — the exampletenant test tenant subscribing
-# to ExampleSuite. Maps to memory internal engineering notes
-# (admin@example.com / platform-admin / e2e gateway test account).
+# to ExampleSuite (an internal end-to-end gateway test account).
 apiVersion: keystone.hexxlock.io/v1alpha1
 kind: ProductInstance
 metadata:

@@ -10,8 +10,8 @@ Production incidents at HexxLock have been traceable to cluster state
 diverging from Git — an admin patched a resource via `kubectl` to fix
 symptoms, the change wasn't reflected in a manifest, and the next Argo CD
 reconcile either reverted the fix (causing a regression) or silently
-ignored it (accumulating drift). This lesson is pinned in the memory file
-internal engineering notes.
+ignored it (accumulating drift). Hence the rule: never patch the cluster
+out-of-band (`kubectl exec`, `kubectl edit`); change the manifest in Git.
 
 Keystone is supposed to be the schema-management authority. If Keystone
 itself can be patched out-of-band, then the cluster's actual schema state

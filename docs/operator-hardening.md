@@ -57,8 +57,8 @@ cert-manager; reject all untrusted CAs via the webhook TLS config.
 - Issued by cert-manager (`Issuer` or `ClusterIssuer`) with a 90-day
   rotation.
 - Keep the private key in `PKCS#8` encoding — this is Linkerd's
-  compatibility requirement and is documented by the HexxLock
-  platform team in internal engineering notes.
+  compatibility requirement (the Linkerd
+  policy-controller rejects PKCS#1 keys).
 - The CA bundle in the `ValidatingWebhookConfiguration` uses
   `cert-manager.io/inject-ca-from` — never pin it by hand; cert
   rotation would break admission silently.
@@ -235,7 +235,7 @@ The CI vars MUST be marked **protected** AND the project's protected
 tags pattern MUST include `v*`. Without protected tags, file/env vars
 marked protected don't inject into tag-triggered pipelines and cosign
 silently falls back to keyless mode (which fails on self-hosted
-GitLab — see internal engineering notes memory).
+GitLab).
 
 **Step 3 — Update the verifier policy + rotation deadline + Secret
 in one MR.**

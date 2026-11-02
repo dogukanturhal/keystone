@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Sample DatabaseProvider — registers the existing CNPG-managed PostgreSQL
-# cluster (example-pg per project memory internal engineering notes). The
+# cluster (example-pg in this example). The
 # admin Secret must live in keystone-system; cross-namespace refs are
 # rejected by the SchemaController.
 #

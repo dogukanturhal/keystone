@@ -269,7 +269,7 @@ webhook:
     # -- Renew before expiry.
     renewBefore: 360h
     # -- Private key algorithm + encoding. PKCS8 is required for Linkerd
-    # compatibility (see internal engineering notes).
+    # compatibility (the Linkerd policy-controller rejects PKCS#1 keys).
     privateKey:
       algorithm: ECDSA
       size: 256

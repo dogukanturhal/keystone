@@ -187,8 +187,8 @@ Common patterns:
 
 Restore by fixing the underlying RBAC / config and letting the
 Deployment's `readinessProbe` recover. Never `kubectl exec` into the
-Pod to monkey-patch — see project memory
-internal engineering notes.
+Pod to monkey-patch: the change is not in Git and Argo CD will
+revert or silently drift from it.
 
 ---
 

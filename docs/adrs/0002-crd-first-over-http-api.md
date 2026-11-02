@@ -13,8 +13,7 @@ State lives in per-service Postgres tables that are invisible to Kubernetes.
 
 Meanwhile, the rest of the HexxLock platform is standardised on GitOps:
 ArgoCD reconciles everything from Git; nothing in a cluster that isn't in a
-manifest. That invariant is also written in our own internal engineering notes
-memory — when the platform drifts from Git, debugging is 5× slower.
+manifest. When the platform drifts from Git, debugging is 5× slower.
 
 ## Decision
 

@@ -34,8 +34,8 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: manager
         # Force pod restart when the webhook cert rotates — the rustls
-        # policy-controller caches certs at startup (see internal engineering notes
-        # pkcs8_encoding.md for the cache-bust pattern).
+        # policy-controller caches certs at startup, so a checksum
+        # annotation forces a new rollout to bust that cache.
         {{- if and .Values.webhook.enabled .Values.webhook.certManager.enabled }}
         checksum/webhook-cert: {{ include "keystone-operator.webhookCertName" . | sha256sum | trunc 16 }}
         {{- end }}

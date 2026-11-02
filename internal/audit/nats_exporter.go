@@ -11,10 +11,9 @@
 // of truth. Backfill via keystone-backfill (cmd/keystoneadm) recovers
 // missed entries after a NATS outage.
 //
-// Architecture refs:
-//   - internal engineering notes — 7-year WORM mandate
-//   - internal engineering notes — root
-//     cause motivating the etcd → NATS → MinIO offload
+// Rationale: audit records must be retained 7 years on WORM storage, and
+// listing high-cardinality CRs out of etcd with kubectl can OOM the client,
+// which motivates the etcd → NATS → MinIO offload.
 
 package audit
 

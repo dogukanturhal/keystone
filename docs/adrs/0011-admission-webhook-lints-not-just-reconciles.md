@@ -60,8 +60,8 @@ Harder: two places to keep in sync. We mitigate by having the webhook
 call into `analyze.DefaultRegistry()` — exact same rules, no drift.
 
 Harder: webhook needs TLS certs and a Service. Cert-manager provides
-them (same pattern Linkerd uses — see
-internal engineering notes). The
+them (same pattern Linkerd uses; self-signed webhook
+certs drift and leave a stale CA bundle). The
 `config/webhook/` kustomize bundle references the cert; operators add
 cert-manager as a bootstrap dep (already in the platform stack).
 
