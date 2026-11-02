@@ -65,9 +65,8 @@ type DatabaseSchemaSpec struct {
 	OwnerRole string `json:"ownerRole"`
 
 	// DefaultPrivileges declares ALTER DEFAULT PRIVILEGES rules applied at
-	// schema creation. See the CNPG-managed-roles landmine documented in
-	// project memory: pre-existing schemas need GRANT / REASSIGN OWNED
-	// before role hand-off, which the controller handles automatically
+	// schema creation. Note for CNPG-managed roles: pre-existing schemas need
+	// GRANT / REASSIGN OWNED before role hand-off, which the controller handles automatically
 	// when ownership changes.
 	//
 	// +optional
