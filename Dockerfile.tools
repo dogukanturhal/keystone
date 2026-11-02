@@ -43,7 +43,9 @@ ARG ALPINE_VERSION=3.21
 # so four findings remain and are carried in .trivyignore.yaml until
 # upstream rebuilds — nothing in this repo can move a vendored dep in a
 # binary we download.
-ARG KUBECTL_VERSION=v1.37.1
+# 2026-11-02 bumped v1.37.1 -> v1.37.2: rebuilt on go1.26.10, clears the
+# stdlib CVEs (78667, 97031, 111943); x/text 0.40.0 and x/net 0.57.0 still lag.
+ARG KUBECTL_VERSION=v1.37.2
 # v3.0.6 carries go.opentelemetry.io/otel v1.41.0 which fixes
 # CVE-2026-29181 (multi-value baggage header DoS amplification). v2.6.3
 # pinned otel v1.38.0 and tripped the trivy HIGH-severity gate on
