@@ -72,8 +72,10 @@ func Init(ctx context.Context, cfg ProviderConfig) (trace.TracerProvider, func(c
 
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+		// Schemaless: resource.Default() carries the SDK's semconv schema URL,
+		// and merging a resource with a different schema URL fails with
+		// "conflicting Schema URL".
+		resource.NewSchemaless(
 			semconv.ServiceName("keystone-manager"),
 			semconv.ServiceVersion(cfg.ServiceVersion),
 		),

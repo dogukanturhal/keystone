@@ -114,7 +114,7 @@ func TestLogger_WriteCR_False_ExporterCalledOnce(t *testing.T) {
 
 	// Sequence must be zero — chain head lives in MinIO.
 	if got.Sequence != 0 {
-		t.Errorf("spec.Sequence=%d, want 0 (chain-head in MinIO per Phase 5a)", got.Sequence)
+		t.Errorf("spec.Sequence=%d, want 0 (chain-head in MinIO in NATS-only mode)", got.Sequence)
 	}
 
 	// PrevHash must be empty — no etcd-side chain pointer.

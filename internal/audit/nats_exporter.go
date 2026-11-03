@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package audit — NATS JetStream exporter (T2 #25 Phase 4).
+// Package audit — NATS JetStream exporter.
 //
 // NATSExporter is the second writer in the dual-write contract:
 //   - AuditEntry CR (etcd) — authoritative, immutable, chain-hashed.

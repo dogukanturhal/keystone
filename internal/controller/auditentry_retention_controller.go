@@ -211,7 +211,7 @@ func (c *AuditEntryRetentionController) runOnce(ctx context.Context, logger logr
 		// log at the bottom of this function so log queries match both.
 		// Without this, the loop is silent for the entire window where
 		// no entries are aged past retention (often weeks at a time on
-		// a 90-day default), which made Phase 5a verification ambiguous
+		// a 90-day default), which made NATS-only mode verification ambiguous
 		// on 2026-05-08 — couldn't tell "loop is fine, no candidates"
 		// from "loop is dead" without a metric scrape.
 		logger.Info("audit retention pass complete",

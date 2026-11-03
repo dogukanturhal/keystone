@@ -89,14 +89,14 @@ type options struct {
 	showVersion            bool
 	enableWebhooks         bool
 	enablePprof            bool
-	// Audit NATS JetStream exporter (T2 #25 Phase 4).
+	// Audit NATS JetStream exporter.
 	// auditNATSURL is the NATS server URL. When empty the NATS exporter is
 	// disabled and the existing stdout / noop path is used unchanged.
 	auditNATSURL            string
 	auditNATSSubjectPrefix  string
 	auditNATSPublishTimeout time.Duration
 	// auditWriteCR controls whether Append writes AuditEntry CRs to etcd.
-	// Default true. Set to false (Phase 5a) after the NATS path has been
+	// Default true. Set to false (NATS-only mode) after the NATS path has been
 	// proven live for 7 days. Must not be false when auditNATSURL is empty.
 	auditWriteCR bool
 
@@ -181,7 +181,7 @@ func parseFlags() *options {
 			"metrics.pprof.enabled=true). Default off — off-by-default keeps "+
 			"the runtime introspection surface inert in production unless an "+
 			"operator deliberately turns it on for a leak hunt.")
-	// T2 #25 Phase 4 — NATS JetStream audit exporter.
+	// NATS JetStream audit exporter.
 	// When --audit-nats-url is empty (the default) no NATS connection is
 	// attempted and behaviour is identical to before this change.
 	flag.StringVar(&o.auditNATSURL, "audit-nats-url",
@@ -198,8 +198,8 @@ func parseFlags() *options {
 		"per-publish context timeout for NATS JetStream; "+
 			"keep generous (5s default) so transient broker latency "+
 			"doesn't surface as false errors in metrics.")
-	// T2 #25 Phase 5a — WriteCR toggle.
-	// Default true (backward compat). Set false only after Phase 4 NATS path
+	// WriteCR toggle.
+	// Default true (backward compat). Set false only after the dual-write NATS path
 	// has been confirmed live for 7 days and MinIO WORM is verified. Requires
 	// AUDIT_NATS_URL to be set; refuses to start otherwise (no audit sink).
 	// CR-TTL controller — garbage collects terminal MigrationBundle and
@@ -231,7 +231,7 @@ func parseFlags() *options {
 	flag.BoolVar(&o.auditWriteCR, "audit-write-cr",
 		envBoolOrDefault("AUDIT_WRITE_CR", true),
 		"write AuditEntry CRs to etcd on each Append; "+
-			"default true. Set false (Phase 5a) only when AUDIT_NATS_URL is also "+
+			"default true. Set false (NATS-only mode) only when AUDIT_NATS_URL is also "+
 			"set and the NATS path has been proven live for 7 days. "+
 			"Overridden by AUDIT_WRITE_CR env var.")
 	flag.Parse()
@@ -382,7 +382,7 @@ func run(o *options, logger *zap.Logger) error {
 			"either turn pprof off or leave secure-metrics on (default)")
 	}
 
-	// T2 #25 Phase 5a — fail-fast: AUDIT_WRITE_CR=false requires AUDIT_NATS_URL.
+	// Fail-fast: AUDIT_WRITE_CR=false requires AUDIT_NATS_URL.
 	// Without a durable NATS sink, every audit event would be silently dropped —
 	// no CR write, no NATS publish, no SIEM record. This violates the 7-year WORM
 	// mandate. Refuse to start rather
@@ -393,7 +393,7 @@ func run(o *options, logger *zap.Logger) error {
 			"audit: AUDIT_WRITE_CR=false requires AUDIT_NATS_URL to be set — " +
 				"disabling CR writes without a durable NATS sink leaves no audit " +
 				"record at all; set AUDIT_NATS_URL or revert AUDIT_WRITE_CR to true " +
-				"(T2 #25 Phase 5a prerequisite: Phase 4 NATS path proven live for 7 days)")
+				"(prerequisite: the dual-write NATS path proven live for 7 days)")
 	}
 
 	metricsOpts := metricsserver.Options{
@@ -525,7 +525,7 @@ func run(o *options, logger *zap.Logger) error {
 
 	auditLogger := audit.NewLogger(mgr.GetClient())
 
-	// T2 #25 Phase 4: select the exporter based on config priority:
+	// Select the exporter based on config priority:
 	//   nats > stdout > noop
 	//
 	// NATS is the durable path (JetStream PUB-ACK, Phase 3 archiver drains
@@ -582,7 +582,7 @@ func run(o *options, logger *zap.Logger) error {
 		logger.Info("audit exporters wired", zap.Int("count", len(exporters)))
 	}
 
-	// T2 #25 Phase 5a — wire the WriteCR toggle and emit boot-time mode log.
+	// Wire the WriteCR toggle and emit boot-time mode log.
 	auditLogger.WriteCR = o.auditWriteCR
 
 	// Boot-time audit mode log — describes the active pipeline so operators
@@ -591,10 +591,10 @@ func run(o *options, logger *zap.Logger) error {
 	case o.auditWriteCR && o.auditNATSURL == "":
 		logger.Info("audit: CR-only (legacy) — AuditEntry CRs written to etcd; no NATS exporter")
 	case o.auditWriteCR && o.auditNATSURL != "":
-		logger.Info("audit: dual-write (Phase 4) — CR authoritative + NATS shadow",
+		logger.Info("audit: dual-write — CR authoritative + NATS shadow",
 			zap.String("natsURL", o.auditNATSURL))
 	default: // !auditWriteCR && auditNATSURL != "" (guard above ensures this is the only remaining case)
-		logger.Info("audit: NATS-only (Phase 5a) — chain-head in MinIO; etcd CR writes disabled",
+		logger.Info("audit: NATS-only — chain-head in MinIO; etcd CR writes disabled",
 			zap.String("natsURL", o.auditNATSURL))
 	}
 
