@@ -44,14 +44,14 @@ const maxBeforeAfterBytes = 32 * 1024
 // over a silently broken chain, so conflicts surface as errors
 // rather than panics.
 //
-// T2 #25 Phase 5a — WriteCR toggle:
+// WriteCR toggle:
 // When WriteCR=false the entire etcd-write path (AuditLog singleton
 // get/create, sequence allocation, AuditEntry CR create, AuditLog
 // status patch) is bypassed. Only the spec hash + Exporter call
-// happen. This is the "NATS-only" mode activated after Phase 4's
+// happen. This is the "NATS-only" mode activated after the
 // dual-write has been proven live for 7 days. The chain ordering
 // responsibility moves from AuditLog.status (etcd) to the archiver's
-// _chain/head.json stored in the MinIO WORM bucket — see the Phase 3
+// _chain/head.json stored in the MinIO WORM bucket — see the
 // audit-archiver service for the head-pointer protocol.
 type Logger struct {
 	Client client.Client
@@ -78,13 +78,13 @@ type Logger struct {
 	// WriteCR controls whether Append persists an AuditEntry CR to etcd.
 	// Default true for backward compatibility (legacy and dual-write modes).
 	//
-	// Set to false (Phase 5a) once the NATS path has been proven live for
+	// Set to false (NATS-only mode) once the NATS path has been proven live for
 	// 7 days and the Phase 3 archiver is confirmed draining entries into
 	// MinIO with WORM object-lock active. In this mode:
 	//
 	//   - Sequence is always 0 and PrevHash is always "" in the published
 	//     spec — the chain ordering lives in the archiver-side
-	//     _chain/head.json in the MinIO WORM bucket (T2 #25 Phase 5a
+	//     _chain/head.json in the MinIO WORM bucket (NATS-only
 	//     architectural shift away from etcd-resident chain-head).
 	//   - SelfHash is still computed so the Exporter's Nats-Msg-Id JetStream
 	//     deduplication key remains stable and backfill replays are idempotent.
@@ -168,7 +168,7 @@ func (l *Logger) Append(ctx context.Context, ev Event) (int64, string, error) {
 		ts = l.ClockFn()
 	}
 
-	// T2 #25 Phase 5a — NATS-only path (WriteCR=false).
+	// NATS-only path (WriteCR=false).
 	//
 	// When WriteCR is false the etcd-write path is bypassed entirely:
 	// no AuditLog singleton read/create, no sequence allocation, no
@@ -177,7 +177,7 @@ func (l *Logger) Append(ctx context.Context, ev Event) (int64, string, error) {
 	//
 	// Sequence=0 and PrevHash="" are intentional: the chain ordering
 	// responsibility has shifted to the archiver-side _chain/head.json
-	// stored in the MinIO WORM bucket (T2 #25 Phase 5a architectural
+	// stored in the MinIO WORM bucket (architectural
 	// shift). The archiver maintains the monotonic head pointer in
 	// object storage; the operator no longer owns chain sequencing.
 	//
@@ -188,7 +188,7 @@ func (l *Logger) Append(ctx context.Context, ev Event) (int64, string, error) {
 		spec := keystonev1alpha1.AuditEntrySpec{
 			// Sequence and PrevHash intentionally zero/empty —
 			// the chain ordering lives in the archiver's
-			// _chain/head.json (T2 #25 Phase 5a architectural shift).
+			// _chain/head.json (architectural shift).
 			Timestamp:   metav1.NewTime(ts),
 			Actor:       ev.Actor,
 			Verb:        ev.Verb,

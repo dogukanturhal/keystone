@@ -193,7 +193,7 @@ func labelSetOf(cm *corev1.ConfigMap) labels.Set {
 	return labels.Set(cm.Labels)
 }
 
-// TestRunRefusesWriteCRFalseWithoutNATS guards the T2 #25 Phase 5a
+// TestRunRefusesWriteCRFalseWithoutNATS guards the NATS-only mode
 // fail-fast: WriteCR=false without AUDIT_NATS_URL would silently drop
 // every audit event (no durable sink). run() must refuse to start and
 // return an error explaining the combination is invalid.

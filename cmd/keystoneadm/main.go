@@ -4,7 +4,7 @@
 //
 // Subcommands:
 //
-//	backfill   Replay existing AuditEntry CRs to NATS JetStream (T2 #25 Phase 4).
+//	backfill   Replay existing AuditEntry CRs to NATS JetStream.
 
 package main
 

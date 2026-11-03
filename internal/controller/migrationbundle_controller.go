@@ -37,7 +37,7 @@ import (
 // the apiserver doesn't reject the whole update.
 const integrityMessageMaxLen = 512
 
-// Reconcile cadence (Phase 5a follow-up to KS#5).
+// Reconcile cadence.
 //
 // readyRequeue is the long-period drift backstop applied when the bundle
 // is Ready=True (matched==applied, every schema at the target version).
